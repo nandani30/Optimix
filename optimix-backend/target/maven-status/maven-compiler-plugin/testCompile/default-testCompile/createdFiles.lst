@@ -1,0 +1,4 @@
+com/optimix/cost/CostCalculatorTests.class
+com/optimix/patterns/PatternTests.class
+com/optimix/join/JoinOptimizerTests.class
+com/optimix/security/SecurityTests.class
