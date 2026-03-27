@@ -157,12 +157,15 @@ public class OptimizationEngine {
         result.patternsApplied      = applied;
         result.indexRecommendations = indexRecs;
         result.joinOrderExplanation = joinExplanation;
-        result.summary              = buildSummary(applied, queryChanged, profile != null);
+        result.summary              = buildSummary(applied, queryChanged, originalPlan, optimizedPlan);
         result.originalPlan         = originalPlan;
         result.optimizedPlan        = optimizedPlan;
 
-        log.info("Optimization complete: {} patterns applied, query changed: {}",
-            applied.size(), queryChanged);
+        log.info("Optimization complete: {} patterns applied, query changed: {}, " +
+                "originalPlan: {}, optimizedPlan: {}",
+            applied.size(), queryChanged, 
+            (originalPlan != null ? "yes" : "no"), 
+            (optimizedPlan != null ? "yes" : "no"));
 
         return result;
     }
@@ -365,6 +368,62 @@ public class OptimizationEngine {
         return recs;
     }
 
+    /**
+     * Build summary accounting for EXPLAIN-based costs and speedups.
+     * STRICT: only mention speedup if we have both original and optimized EXPLAIN data.
+     * Reports real row count ratios or null speedups — no invented multipliers.
+     */
+    private String buildSummary(List<OptimizationResult.PatternApplication> applied,
+                                 boolean queryChanged, 
+                                 OptimizationResult.ExecutionPlan originalPlan,
+                                 OptimizationResult.ExecutionPlan optimizedPlan) {
+        if (applied.isEmpty()) {
+            return "No optimizations found — query already looks optimal.";
+        }
+
+        long high   = applied.stream().filter(p -> "HIGH".equals(p.impactLevel)).count();
+        long medium = applied.stream().filter(p -> "MEDIUM".equals(p.impactLevel)).count();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(applied.size()).append(" optimization");
+        if (applied.size() != 1) sb.append("s");
+        sb.append(" found");
+
+        if (high > 0 || medium > 0) {
+            sb.append(" (");
+            if (high > 0)   sb.append(high).append(" HIGH");
+            if (high > 0 && medium > 0) sb.append(", ");
+            if (medium > 0) sb.append(medium).append(" MEDIUM");
+            sb.append(" impact)");
+        }
+
+        // Only mention speedup if we have EXPLAIN data for both plans and query actually changed
+        if (originalPlan != null && optimizedPlan != null && queryChanged) {
+            Double speedup = explainRunner.computeSpeedupRatio(originalPlan, optimizedPlan);
+            if (speedup != null && speedup > 1.0) {
+                // Format the ratio cleanly: 10.5x, 2.1x, etc.
+                if (speedup < 1.1) {
+                    sb.append(" EXPLAIN estimates similar performance.");
+                } else if (speedup >= 10.0) {
+                    sb.append(" EXPLAIN shows ").append(String.format("%.0f", speedup)).append("x fewer rows examined.");
+                } else {
+                    sb.append(" EXPLAIN shows ").append(String.format("%.1f", speedup)).append("x fewer rows examined.");
+                }
+            } else if (speedup != null && speedup <= 1.0) {
+                sb.append(" Query rewritten. EXPLAIN row estimates within same magnitude.");
+            }
+        } else if (queryChanged) {
+            sb.append(" Query rewritten.");
+        }
+
+        if (originalPlan == null && applied.size() > 0) {
+            sb.append(" Connect a database for EXPLAIN-backed speedup verification.");
+        }
+
+        return sb.toString();
+    }
+
+    // Overload version for backwards compatibility
     private String buildSummary(List<OptimizationResult.PatternApplication> applied,
                                  boolean queryChanged, boolean hasDbConnection) {
         if (applied.isEmpty()) {

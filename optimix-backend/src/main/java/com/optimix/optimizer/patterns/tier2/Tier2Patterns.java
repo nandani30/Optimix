@@ -18,19 +18,21 @@ class P11_NotInAntiJoin implements OptimizationPattern {
     public Tier   getTier() { return Tier.TIER2; }
 
     public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-        return stmt.toString().toUpperCase().contains("NOT IN");
+        String sql = stmt.toString().toUpperCase();
+        // Only flag if NOT IN is used with a subquery (contains SELECT)
+        return sql.contains("NOT IN") && sql.matches("(?s).*NOT\\s+IN\\s*\\(\\s*SELECT.*\\).*");
     }
 
     public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
         if (!detect(stmt, stats)) return Optional.empty();
         return Optional.of(buildApplication(
-            "NOT IN (SELECT ...) forces nested-loop execution and returns no rows at all " +
-            "if the subquery contains any NULL value — a subtle correctness bug.",
+            "NOT IN (SELECT ...) forces nested-loop execution and is incorrect if the subquery " +
+            "contains any NULL value — the result becomes empty. This is a correctness bug, not just a performance issue.",
             "Rewrite to LEFT JOIN ... WHERE joined_col IS NULL (anti-join pattern). " +
-            "The optimizer can execute this with a hash anti-join and handles NULLs correctly.",
+            "The optimizer can execute this with a hash anti-join and handles NULLs correctly, preserving the correct row set.",
             "HIGH",
-            "HIGH — NOT IN with a subquery prevents hash anti-join; also the NULL-safety " +
-            "issue means the current query may silently return wrong results.",
+            "HIGH — NOT IN with NULL is a correctness bug; the anti-join form prevents both the NULL issue " +
+            "and allows hash anti-join execution instead of nested loops.",
             "SELECT * FROM customers c WHERE c.id NOT IN (SELECT customer_id FROM orders)",
             "SELECT c.* FROM customers c\nLEFT JOIN orders o ON c.id = o.customer_id\nWHERE o.customer_id IS NULL"
         ));
@@ -107,22 +109,30 @@ class P14_FunctionOnColumn implements OptimizationPattern {
     public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
         String sql = stmt.toString().toUpperCase();
         if (!sql.contains("WHERE")) return false;
-        for (String fn : DATE_FNS)   { if (sql.contains(fn)) return true; }
-        for (String fn : STRING_FNS) { if (sql.contains(fn)) return true; }
+        // Check if function appears specifically in WHERE clause context
+        int whereIdx = sql.indexOf("WHERE");
+        String wherePart = sql.substring(whereIdx);
+        for (String fn : DATE_FNS)   { if (wherePart.contains(fn)) return true; }
+        for (String fn : STRING_FNS) { if (wherePart.contains(fn)) return true; }
         return false;
     }
 
     public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
         if (!detect(stmt, stats)) return Optional.empty();
         String sql = stmt.toString().toUpperCase();
+        
+        // Extract WHERE clause
+        int whereIdx = sql.indexOf("WHERE");
+        String wherePart = sql.substring(whereIdx);
+        
         String before, after;
-        if (sql.contains("YEAR(")) {
+        if (wherePart.contains("YEAR(")) {
             before = "WHERE YEAR(created_at) = 2024";
             after  = "WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01'";
-        } else if (sql.contains("MONTH(")) {
+        } else if (wherePart.contains("MONTH(")) {
             before = "WHERE MONTH(order_date) = 3";
             after  = "WHERE order_date >= '2024-03-01' AND order_date < '2024-04-01'";
-        } else if (sql.contains("LOWER(") || sql.contains("UPPER(")) {
+        } else if (wherePart.contains("LOWER(") || wherePart.contains("UPPER(")) {
             before = "WHERE LOWER(email) = 'user@example.com'";
             after  = "WHERE email = 'user@example.com'  -- use case-insensitive collation";
         } else {

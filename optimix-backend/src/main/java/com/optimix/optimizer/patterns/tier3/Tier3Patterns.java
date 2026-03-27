@@ -20,19 +20,27 @@ class P26_SelectStar implements OptimizationPattern {
     public Tier   getTier() { return Tier.TIER3; }
 
     public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-        return stmt.toString().matches("(?s).*SELECT\\s+\\*.*");
+        String sql = stmt.toString();
+        // Only flag SELECT * when used with JOINs, WHERE, GROUP BY, or in complex contexts
+        // SELECT * alone from a single table is often intentional.
+        String upper = sql.toUpperCase();
+        return upper.contains("SELECT *") && 
+               (upper.contains("JOIN") || upper.contains("WHERE") || 
+                upper.contains("GROUP BY") || upper.contains("UNION") ||
+                upper.contains("ORDER BY"));
     }
 
     public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
         if (!detect(stmt, stats)) return Optional.empty();
         return Optional.of(buildApplication(
-            "SELECT * fetches every column — including ones the application never reads.",
-            "Replace * with only the columns needed by the WHERE clause, ORDER BY, and application logic.",
+            "SELECT * fetches every column — including ones filtered or joined on but never returned.",
+            "Replace * with only the columns needed by the WHERE clause, ORDER BY, and application logic. " +
+            "Reduces data transfer and improves index-only scan opportunities.",
             "LOW",
             "LOW — reduces data transfer; for wide tables (20+ columns or large TEXT/BLOB fields) " +
             "savings can be significant but the pattern itself is not algorithmically expensive.",
-            "SELECT * FROM products WHERE category = 'electronics'",
-            "SELECT id, name, price, stock FROM products WHERE category = 'electronics'"
+            "SELECT * FROM products JOIN categories c ON c.id = category_id WHERE status = 'active'",
+            "SELECT p.id, p.name, p.price FROM products p JOIN categories c ON c.id = p.category_id WHERE p.status = 'active'"
         ));
     }
 }
@@ -373,7 +381,7 @@ class P37_ImplicitJoin implements OptimizationPattern {
 
 // ════════════════════════════════════════════════════════════════════════════
 //  P38 — Scalar Subquery → JOIN (WHERE clause version)
-// ════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════��═════════
 class P38_ScalarToJoin implements OptimizationPattern {
     public String getId()   { return "P38_SCALAR_JOIN"; }
     public String getName() { return "Scalar Subquery → JOIN"; }
