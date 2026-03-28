@@ -76,6 +76,9 @@ export interface PatternApplication {
   estimatedSpeedup: number
   beforeSnippet: string
   afterSnippet: string
+  // Added fields to match the Java backend
+  impactLevel?: 'HIGH' | 'MEDIUM' | 'LOW' | string
+  impactReason?: string
 }
 
 export interface IndexRecommendation {
@@ -84,6 +87,8 @@ export interface IndexRecommendation {
   reason: string
   createStatement: string
   estimatedImprovement: number
+  // Added field to match the Java backend
+  confirmed?: boolean
 }
 
 export interface PlanNode {
