@@ -19,10 +19,8 @@ public class GoogleTokenVerifier {
 
     public static GoogleTokenInfo verify(String idToken) throws Exception {
         try {
-            // 🔴 CRITICAL FIX: Direct JWT decoding for local Desktop App.
-            // This bypasses brittle Environment Variable (CLIENT_ID) checks 
-            // and network API calls that cause 401s during local development.
-            
+            // Direct JWT decoding for local Desktop App.
+            // This bypasses brittle Environment Variable checks.
             String[] chunks = idToken.split("\\.");
             if (chunks.length < 2) {
                 throw new Exception("Invalid JWT token structure");
@@ -43,7 +41,6 @@ public class GoogleTokenVerifier {
 
         } catch (Exception e) {
             log.error("GoogleTokenVerifier failed: {}", e.getMessage());
-            // This throws back to the Controller to trigger a 401, but logs the REAL reason now!
             throw new Exception("Unauthorized: " + e.getMessage());
         }
     }
