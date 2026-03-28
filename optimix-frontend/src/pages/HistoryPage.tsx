@@ -21,7 +21,7 @@ export default function HistoryPage() {
       .then(setEntries)
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [setEntries])
 
   const handleReRun = (entry: HistoryEntry) => {
     setInputQuery(entry.originalQuery)
@@ -38,7 +38,8 @@ export default function HistoryPage() {
     finally { setDeletingId(null) }
   }
 
-  const parsePatterns = (raw: string): string[] => {
+  const parsePatterns = (raw: string | null): string[] => {
+    if (!raw) return []
     try {
       return JSON.parse(raw) as string[]
     } catch {
@@ -46,12 +47,13 @@ export default function HistoryPage() {
     }
   }
 
+  // CRITICAL FIX: Safe null-checking to prevent React crashes
   const filtered = entries.filter((e) => {
     if (!search.trim()) return true
     const q = search.toLowerCase()
     return (
-      e.originalQuery.toLowerCase().includes(q) ||
-      e.patternsApplied.toLowerCase().includes(q)
+      (e.originalQuery || '').toLowerCase().includes(q) ||
+      (e.patternsApplied || '').toLowerCase().includes(q)
     )
   })
 
@@ -82,8 +84,6 @@ export default function HistoryPage() {
 
   return (
     <div className="h-full flex flex-col bg-bg-base">
-
-      {/* Header */}
       <div className="px-6 py-4 border-b border-border bg-bg-surface flex-shrink-0">
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -98,130 +98,66 @@ export default function HistoryPage() {
           placeholder="Search queries or patterns…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full bg-bg-raised border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent transition-colors"
+          className="w-full bg-bg-base border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/50 transition-colors placeholder:text-text-disabled"
         />
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-4">
-
-        {loading && (
-          <div className="space-y-2">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="skeleton h-20 rounded-xl" />
-            ))}
-          </div>
-        )}
-
-        {!loading && filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="text-5xl mb-4 opacity-20">📭</div>
-            <p className="text-sm text-text-muted">
-              {search ? 'No results match your search' : 'No optimization history yet'}
-            </p>
-            {!search && (
-              <p className="text-xs text-text-disabled mt-1">
-                Optimize your first query to see it here
-              </p>
-            )}
-          </div>
-        )}
-
-        <div className="space-y-2">
-          {filtered.map((entry) => {
-            const patterns  = parsePatterns(entry.patternsApplied)
-            const isExpanded = expandedId === entry.historyId
-
-            return (
-              <div
-                key={entry.historyId}
-                className="bg-bg-surface border border-border rounded-xl overflow-hidden transition-colors hover:border-border"
-              >
-                {/* Row header — always visible */}
-                <div
-                  className="flex items-center gap-3 p-4 cursor-pointer hover:bg-bg-raised transition-colors"
-                  onClick={() => setExpandedId(isExpanded ? null : entry.historyId)}
-                >
-                  <SpeedupBadge v={entry.speedupFactor} />
-
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-text-primary font-mono truncate">
-                      {entry.originalQuery
-                        .replace(/\s+/g, ' ')
-                        .trim()
-                        .slice(0, 100)}
-                      {entry.originalQuery.length > 100 && '…'}
-                    </p>
-                    <div className="flex items-center gap-3 mt-1">
-                      <span className="text-2xs text-text-disabled">{formatDate(entry.createdAt)}</span>
+      <div className="flex-1 overflow-y-auto p-6">
+        {loading ? (
+          <div className="flex justify-center py-10"><div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin"/></div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-20 text-text-muted text-sm">No history found.</div>
+        ) : (
+          <div className="space-y-4 max-w-4xl mx-auto">
+            {filtered.map((entry) => {
+              const patterns = parsePatterns(entry.patternsApplied)
+              const isExpanded = expandedId === entry.historyId
+              return (
+                <div key={entry.historyId} className="bg-bg-surface border border-border rounded-lg overflow-hidden flex flex-col transition-colors hover:border-border-hover">
+                  <div 
+                    className="p-4 cursor-pointer flex gap-4"
+                    onClick={() => setExpandedId(isExpanded ? null : entry.historyId)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-medium text-text-muted">{formatDate(entry.createdAt)}</span>
+                          {entry.speedupFactor != null && <SpeedupBadge v={entry.speedupFactor} />}
+                        </div>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={(e) => { e.stopPropagation(); handleReRun(entry) }} className="text-xs text-accent hover:text-accent-hover px-2 py-1">Re-run</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleDelete(entry.historyId) }} className="text-xs text-red hover:text-red/80 px-2 py-1">
+                            {deletingId === entry.historyId ? '…' : 'Delete'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="font-mono text-xs text-text-secondary truncate bg-bg-base p-2 rounded border border-border/50">
+                        {entry.originalQuery}
+                      </div>
                       {patterns.length > 0 && (
-                        <span className="text-2xs text-text-muted">
-                          {patterns.length} pattern{patterns.length !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                      <span className="text-2xs text-text-disabled">
-                        {entry.originalCost != null ? entry.originalCost.toFixed(0) : '—'} → 
-{entry.optimizedCost != null ? entry.optimizedCost.toFixed(0) : '—'} units
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      onClick={(ev) => { ev.stopPropagation(); handleReRun(entry) }}
-                      className="text-xs px-2.5 py-1 border border-border rounded hover:border-accent hover:text-accent text-text-muted transition-colors"
-                    >
-                      Re-run
-                    </button>
-                    <button
-                      onClick={(ev) => { ev.stopPropagation(); handleDelete(entry.historyId) }}
-                      disabled={deletingId === entry.historyId}
-                      className="text-xs px-2.5 py-1 border border-border rounded hover:border-red hover:text-red text-text-muted transition-colors disabled:opacity-40"
-                    >
-                      {deletingId === entry.historyId ? '⟳' : 'Delete'}
-                    </button>
-                    <span className="text-text-disabled text-xs w-4 text-center">
-                      {isExpanded ? '▲' : '▼'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Expanded detail */}
-                {isExpanded && (
-                  <div className="border-t border-border p-4 space-y-3 animate-fade-in bg-bg-base/50">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <p className="text-2xs text-text-disabled uppercase tracking-wider mb-2">Original</p>
-                        <pre className="text-xs font-mono bg-bg-base border border-border rounded-lg p-3 overflow-x-auto text-text-secondary whitespace-pre-wrap max-h-32 overflow-y-auto">
-                          {entry.originalQuery.trim()}
-                        </pre>
-                      </div>
-                      <div>
-                        <p className="text-2xs text-text-disabled uppercase tracking-wider mb-2">Optimized</p>
-                        <pre className="text-xs font-mono bg-bg-base border border-accent/20 rounded-lg p-3 overflow-x-auto text-accent whitespace-pre-wrap max-h-32 overflow-y-auto">
-                          {entry.optimizedQuery.trim()}
-                        </pre>
-                      </div>
-                    </div>
-
-                    {patterns.length > 0 && (
-                      <div>
-                        <p className="text-2xs text-text-disabled uppercase tracking-wider mb-2">Patterns applied</p>
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="mt-3 flex flex-wrap gap-1.5">
                           {patterns.map((p, i) => (
-                            <span key={i} className="text-2xs px-2 py-0.5 bg-bg-overlay border border-border rounded-full text-text-muted">
+                            <span key={i} className="px-1.5 py-0.5 rounded bg-bg-overlay border border-border text-[10px] text-text-muted font-mono">
                               {p}
                             </span>
                           ))}
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
+                  {isExpanded && (
+                    <div className="px-4 pb-4 pt-2 border-t border-border/50 bg-bg-base/50">
+                      <p className="text-xs font-semibold text-text-primary mb-1.5">Optimized Query</p>
+                      <div className="font-mono text-xs text-accent whitespace-pre-wrap break-all bg-bg-surface p-3 rounded border border-border/50">
+                        {entry.optimizedQuery}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
