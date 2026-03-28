@@ -102,7 +102,6 @@ function createWindow() {
 
   mainWindow.on('closed', () => { mainWindow = null })
 
-  // 🔴 CRITICAL FIX FOR GOOGLE AUTH 🔴
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     // 1. Allow Google Auth to open as an internal Electron popup
     if (url.includes('accounts.google.com') || url.includes('oauth2')) {
@@ -132,11 +131,15 @@ app.on('browser-window-created', (event, win) => {
         const params = new URLSearchParams(hash);
         const idToken = params.get('id_token');
         
-        if (idToken && mainWindow) {
+        if (idToken && mainWindow && !mainWindow.isDestroyed()) {
           // Send the token back to the main React window securely!
-          mainWindow.webContents.executeJavaScript(`window.postMessage({ type: 'GOOGLE_AUTH_TOKEN', token: '${idToken}' }, '*')`);
+          mainWindow.webContents.executeJavaScript(`window.postMessage({ type: 'GOOGLE_AUTH_TOKEN', token: '${idToken}' }, '*')`).catch(() => {});
         }
-        win.close(); // Close the Google popup automatically
+        
+        // 🔴 CRITICAL FIX: Defer window close to prevent C++ Segmentation Fault 🔴
+        setTimeout(() => {
+          if (!win.isDestroyed()) win.close();
+        }, 100);
       }
     };
 
