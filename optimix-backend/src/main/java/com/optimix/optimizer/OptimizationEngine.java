@@ -196,6 +196,12 @@ public class OptimizationEngine {
         OptimizationResult result = new OptimizationResult();
         result.originalQuery        = sql;
         result.optimizedQuery       = optimizedSql;
+        
+        // Feed the CBO math to the frontend
+        result.originalCost         = costBefore;
+        result.optimizedCost        = costAfter;
+        result.speedupFactor        = costBefore > 0 ? (costBefore / Math.max(1.0, costAfter)) : 1.0;
+
         result.patternsApplied      = applied;
         result.indexRecommendations = indexRecs;
         result.joinOrderExplanation = joinExplanation;
