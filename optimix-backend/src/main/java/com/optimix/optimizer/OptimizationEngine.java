@@ -187,8 +187,15 @@ public class OptimizationEngine {
         OptimizationResult.ExecutionPlan optimizedPlan = null;
         if (profile != null && queryChanged) {
             try {
+                // We ask MySQL to verify the new query. If it fails, it throws an Exception!
                 optimizedPlan = explainRunner.runExplain(optimizedSql, profile);
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                log.warn("MySQL rejected the optimized query: {}. Reverting safely.", e.getMessage());
+                optimizedSql = sql; // <-- THE ULTIMATE GUARANTEE
+                queryChanged = false;
+                applied.clear();
+                costAfter = costBefore;
+            }
         }
 
         List<OptimizationResult.IndexRecommendation> indexRecs = buildIndexRecommendations(applied, stats, profile);
