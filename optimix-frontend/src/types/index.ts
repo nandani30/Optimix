@@ -102,6 +102,7 @@ export interface PlanNode {
 
 export interface ExecutionPlan {
   root: PlanNode
+  rawExplain?: string
 }
 
 export interface OptimizationResult {

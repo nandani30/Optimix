@@ -174,7 +174,7 @@ export default function ResultsPanel({ result, isLoading, error }: Props) {
               <div className="bg-bg-surface p-4 rounded-lg border border-border mb-4">
                 <h3 className="text-sm font-semibold text-text-primary mb-2 flex items-center gap-2">
                   <svg className="w-4 h-4 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4-8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4-8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8-4s-8-1.79-8-4" />
                   </svg>
                   ACCESS ORDER
                 </h3>
@@ -186,10 +186,21 @@ export default function ResultsPanel({ result, isLoading, error }: Props) {
 
             <div className="bg-bg-surface p-4 rounded-lg border border-border">
               <h3 className="text-sm font-semibold text-text-primary mb-3">EXECUTION PLAN</h3>
-              {/* CRITICAL FIX: Render originalPlan if optimized is missing */}
               {(result.optimizedPlan?.root || result.originalPlan?.root) ? (
-                <div className="overflow-x-auto pb-4">
-                  <PlanTree node={result.optimizedPlan?.root || result.originalPlan?.root} />
+                <div className="space-y-4">
+                  <div className="overflow-x-auto pb-2">
+                    <PlanTree node={result.optimizedPlan?.root || result.originalPlan?.root} />
+                  </div>
+                  
+                  {/* NEW: Render the Raw MySQL Table Output! */}
+                  {(result.optimizedPlan?.rawExplain || result.originalPlan?.rawExplain) && (
+                    <div className="mt-4 pt-4 border-t border-border/50">
+                      <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Raw MySQL Output</p>
+                      <pre className="text-xs text-accent bg-bg-base p-3 rounded font-mono overflow-x-auto border border-border/50 whitespace-pre">
+                        {result.optimizedPlan?.rawExplain || result.originalPlan?.rawExplain}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-text-muted italic py-4 text-center border border-dashed border-border rounded">
