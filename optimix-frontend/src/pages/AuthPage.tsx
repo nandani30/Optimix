@@ -24,6 +24,27 @@ export default function AuthPage() {
   const navigate    = useNavigate()
   const go = (s: AuthScreen) => { setScreen(s); setError(''); setSuccess('') }
 
+  // 🔴 CRITICAL FIX: Listen for token passed back from Electron main.js 🔴
+  useEffect(() => {
+    if (!isElectron) return;
+    const handleMessage = async (e: MessageEvent) => {
+      if (e.data?.type === 'GOOGLE_AUTH_TOKEN') {
+        setError(''); setLoading(true);
+        try {
+          const res = await authApi.googleLogin(e.data.token);
+          setAuth(res.user, res.token);
+          window.location.href = '/optimizer';
+        } catch (err: any) {
+          setError(err?.message || 'Google sign-in failed');
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [setAuth]);
+
   useEffect(() => {
     if (isElectron || !window.google) return
     const tryInit = () => {
@@ -36,7 +57,6 @@ export default function AuthPage() {
           try {
               const res = await authApi.googleLogin(r.credential)
               setAuth(res.user, res.token)
-              // Hard reload ensures stale React state is cleared
               window.location.href = '/optimizer'
             }
           catch (e: any) { setError(e?.message || 'Google sign-in failed') }
@@ -48,7 +68,7 @@ export default function AuthPage() {
         window.google.accounts.id.renderButton(el, { theme: 'filled_black', size: 'large', text: 'continue_with', width: 300 })
     }
     tryInit(); const t = setTimeout(tryInit, 1000); return () => clearTimeout(t)
-  }, [screen])
+  }, [screen, setAuth])
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setError(''); setLoading(true)
