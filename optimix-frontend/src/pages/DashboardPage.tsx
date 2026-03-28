@@ -11,14 +11,21 @@ export default function DashboardPage() {
   const navigate          = useNavigate()
 
   useEffect(() => {
-  historyApi.list()
-    .then((data) => setEntries(data))
-    .catch(() => {})
-}, [])
+    historyApi.list()
+      .then((data) => setEntries(data))
+      .catch(() => {})
+  }, [setEntries])
 
-  const total       = entries.length
-  const avgSpeedup  = total ? entries.reduce((s,e) => s+e.speedupFactor,0)/total : 0
-  const bestSpeedup = total ? Math.max(...entries.map(e=>e.speedupFactor)) : 0
+  const total = entries.length
+  
+  // CRITICAL FIX: Filter out old queries that don't have a valid speedupFactor yet
+  const validSpeedups = entries
+    .map(e => Number(e.speedupFactor))
+    .filter(v => !isNaN(v) && v > 0)
+
+  const avgSpeedup  = validSpeedups.length > 0 ? validSpeedups.reduce((s,v) => s + v, 0) / validSpeedups.length : 0
+  const bestSpeedup = validSpeedups.length > 0 ? Math.max(...validSpeedups) : 0
+  
   const firstName   = user?.fullName?.split(' ')[0] ?? 'there'
   const hour        = new Date().getHours()
   const greeting    = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -37,8 +44,8 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           {[
             { label: 'Queries optimized', value: total,                        icon: '⚡', color: 'text-accent' },
-            { label: 'Average speedup',   value: total ? `${avgSpeedup.toFixed(1)}×` : '—', icon: '📈', color: 'text-blue' },
-            { label: 'Best result',       value: total ? `${bestSpeedup.toFixed(1)}×` : '—', icon: '🏆', color: 'text-yellow' },
+            { label: 'Average speedup',   value: validSpeedups.length > 0 ? `${avgSpeedup.toFixed(1)}×` : '—', icon: '📈', color: 'text-blue' },
+            { label: 'Best result',       value: validSpeedups.length > 0 ? `${bestSpeedup.toFixed(1)}×` : '—', icon: '🏆', color: 'text-yellow' },
             { label: 'Connections',       value: connections.length,           icon: '🔌', color: 'text-purple' },
           ].map(s => (
             <div key={s.label} className="bg-bg-surface border border-border rounded-xl p-4">
@@ -103,13 +110,15 @@ export default function DashboardPage() {
 function HistoryRow({ entry }: { entry: HistoryEntry }) {
   const navigate = useNavigate()
   const { setInputQuery, reset } = useOptimizerStore()
-  const speedup = entry.speedupFactor
-  const color = speedup >= 10 ? 'text-accent' : speedup >= 3 ? 'text-yellow' : 'text-text-secondary'
+  
+  const speedup = Number(entry.speedupFactor)
+  const isValid = !isNaN(speedup) && speedup > 0
+  const color = isValid && speedup >= 10 ? 'text-accent' : isValid && speedup >= 3 ? 'text-yellow' : 'text-text-secondary'
 
   return (
     <button onClick={() => { setInputQuery(entry.originalQuery); reset(); navigate('/optimizer') }}
       className="w-full flex items-center gap-3 p-3 bg-bg-surface border border-border rounded-xl hover:bg-bg-raised text-left transition-colors">
-      <span className={`text-sm font-mono font-bold w-12 flex-shrink-0 ${color}`}>{speedup ? speedup.toFixed(1) : '—'}×</span>
+      <span className={`text-sm font-mono font-bold w-12 flex-shrink-0 ${color}`}>{isValid ? speedup.toFixed(1) : '—'}×</span>
       <p className="flex-1 text-xs font-mono text-text-secondary truncate">{entry.originalQuery.replace(/\s+/g,' ').trim()}</p>
       <span className="text-2xs text-text-disabled flex-shrink-0">{new Date(entry.createdAt).toLocaleDateString()}</span>
     </button>
