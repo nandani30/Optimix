@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -16,44 +17,21 @@ import org.slf4j.LoggerFactory;
 import com.optimix.model.OptimizationResult;
 import com.optimix.model.TableStatistics;
 
-/**
- * Runs real MySQL EXPLAIN and SHOW INDEX queries against the user's database.
- *
- * All data returned comes directly from MySQL — nothing is invented or estimated.
- *
- * Rules:
- *   - Only runs when a real DB connection is provided (connectionId != null)
- *   - EXPLAIN ANALYZE is attempted only on MySQL 8.0.18+; gracefully skipped otherwise
- *   - SHOW INDEX is used to confirm which indexes actually exist
- *   - No fake cost numbers, no fabricated multipliers
- */
 public class ExplainRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ExplainRunner.class);
 
-    /**
-     * Run EXPLAIN on the given SQL and return a PlanNode tree.
-     * Returns null when the connection is unavailable or the query cannot be explained.
-     *
-     * @param sql     The query to explain (must be a SELECT statement)
-     * @param profile Connection credentials
-     */
-    public OptimizationResult.ExecutionPlan runExplain(String sql, ConnectionProfile profile) {
+    public OptimizationResult.ExecutionPlan runExplain(String sql, ConnectionProfile profile) throws Exception {
         if (profile == null || sql == null) return null;
 
         String url = buildJdbcUrl(profile);
         try (Connection conn = DriverManager.getConnection(url, profile.username, profile.password)) {
             return doExplain(conn, sql);
-        } catch (Exception e) {
-            log.warn("EXPLAIN failed: {}", e.getMessage());
-            return null;
+        } catch (SQLException e) {
+            throw new Exception("MySQL Error: " + e.getMessage());
         }
     }
 
-    /**
-     * Run SHOW INDEX FROM <table> and return the list of index names and their columns.
-     * Returns an empty list on failure (treat as "no confirmed indexes").
-     */
     public List<TableStatistics.IndexStats> runShowIndex(String tableName, ConnectionProfile profile) {
         if (profile == null || tableName == null) return List.of();
 
@@ -76,7 +54,7 @@ public class ExplainRunner {
                     idx.isUnique    = !nonUnique;
                     idx.columns     = new ArrayList<>();
                     idx.cardinality = cardinality;
-                    idx.height      = 3; // B-tree height estimation not available via SHOW INDEX
+                    idx.height      = 3; 
                     indexMap.put(indexName, idx);
                 }
                 indexMap.get(indexName).columns.add(colName);
@@ -89,15 +67,28 @@ public class ExplainRunner {
         return result;
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
-
     private OptimizationResult.ExecutionPlan doExplain(Connection conn, String sql) throws SQLException {
-        // EXPLAIN FORMAT=TRADITIONAL produces one row per table/join step
         try (PreparedStatement ps = conn.prepareStatement("EXPLAIN " + sql)) {
             ResultSet rs = ps.executeQuery();
+            ResultSetMetaData meta = rs.getMetaData();
+            int colCount = meta.getColumnCount();
+            
+            StringBuilder raw = new StringBuilder();
+            
+            for (int i = 1; i <= colCount; i++) {
+                raw.append(String.format("%-15s", meta.getColumnName(i)));
+            }
+            raw.append("\n");
+
             List<OptimizationResult.PlanNode> nodes = new ArrayList<>();
 
             while (rs.next()) {
+                for (int i = 1; i <= colCount; i++) {
+                    String val = rs.getString(i);
+                    raw.append(String.format("%-15s", val != null ? val : "NULL"));
+                }
+                raw.append("\n");
+
                 OptimizationResult.PlanNode node = new OptimizationResult.PlanNode();
                 node.table        = safeString(rs, "table");
                 node.accessType   = safeString(rs, "type");
@@ -118,7 +109,6 @@ public class ExplainRunner {
 
             if (nodes.isEmpty()) return null;
 
-            // Build a simple left-deep tree: each node wraps the previous
             OptimizationResult.PlanNode root = nodes.get(0);
             for (int i = 1; i < nodes.size(); i++) {
                 OptimizationResult.PlanNode join = new OptimizationResult.PlanNode();
@@ -130,12 +120,13 @@ public class ExplainRunner {
 
             OptimizationResult.ExecutionPlan plan = new OptimizationResult.ExecutionPlan();
             plan.root = root;
+            plan.rawExplain = raw.toString();
             return plan;
         }
     }
 
     private String safeString(ResultSet rs, String col) {
-        try { return rs.getString(col); } catch (Exception e) { return null; }
+        try { return rs.getString(col); } catch (SQLException e) { return null; }
     }
 
     private String buildJdbcUrl(ConnectionProfile p) {
@@ -143,8 +134,6 @@ public class ExplainRunner {
             "jdbc:mysql://%s:%d/%s?connectTimeout=10000&useSSL=false&allowPublicKeyRetrieval=true",
             p.host, p.port, p.databaseName);
     }
-
-    // ── Connection profile (minimal, passed from OptimizationEngine) ──────────
 
     public static class ConnectionProfile {
         public String host, databaseName, username, password;
