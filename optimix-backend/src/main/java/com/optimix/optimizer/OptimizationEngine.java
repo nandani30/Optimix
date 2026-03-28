@@ -165,7 +165,9 @@ public class OptimizationEngine {
         }
 
         String joinExplanation = "";
-        if (tableNames.size() >= 2) {
+        // CRITICAL FIX: Only run JoinOptimizer if the query actually contains joins
+        boolean hasJoins = sql.toUpperCase().contains("JOIN") || sql.contains(",");
+        if (tableNames.size() >= 2 && hasJoins) {
             if (originalPlan != null) {
                 mergeExplainRowsIntoStats(originalPlan, stats);
             }
@@ -229,9 +231,9 @@ public class OptimizationEngine {
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("tables", tableNames);
-        result.put("issues", issues);
-        result.put("dbConnected", connectionId != null);
+        result.put("tables",          tableNames);
+        result.put("issues",          issues);
+        result.put("dbConnected",     connectionId != null);
         return result;
     }
 
@@ -407,16 +409,14 @@ public class OptimizationEngine {
     private String buildJoinExplanation(JoinOptimizer.JoinPlan plan, List<String> tables,
                                          boolean hasRealStats) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Suggested join order (Selinger DP based on ");
-        sb.append(hasRealStats ? "EXPLAIN row estimates" : "fallback row estimates");
-        sb.append("):\n");
+        sb.append("Suggested table access order (Selinger DP):\n");
         sb.append("  ").append(plan.toReadableString()).append("\n\n");
 
         if (!hasRealStats) {
             sb.append("Note: No DB connection — estimates use default fallback values.\n");
-            sb.append("Connect a database for EXPLAIN-backed join order analysis.\n");
+            sb.append("Connect a database for EXPLAIN-backed access order analysis.\n");
         } else {
-            sb.append("Row estimates sourced from EXPLAIN. Actual join algorithm is chosen by MySQL at runtime.\n");
+            sb.append("Row estimates sourced from EXPLAIN. Actual algorithm chosen by MySQL at runtime.\n");
         }
 
         sb.append(tables.size()).append(" tables analyzed.");
