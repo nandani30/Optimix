@@ -82,9 +82,12 @@ public class OptimizationEngine {
 
         OptimizationResult.ExecutionPlan originalPlan = null;
         if (profile != null) {
-            originalPlan = explainRunner.runExplain(sql, profile);
-            if (originalPlan != null) {
+            try {
+                originalPlan = explainRunner.runExplain(sql, profile);
                 log.info("EXPLAIN succeeded for original query");
+            } catch (Exception e) {
+                // If MySQL rejects the query (e.g. table doesn't exist), fail immediately!
+                throw new IllegalArgumentException(e.getMessage());
             }
         }
 
