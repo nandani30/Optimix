@@ -58,7 +58,6 @@ export default function ResultsPanel({ result, isLoading, error }: Props) {
 
   const hasIndexes = result.indexRecommendations?.length > 0
   const hasPatterns = result.patternsApplied?.length > 0
-  // CRITICAL FIX: If optimizedPlan is null, check for originalPlan so we always show visuals
   const hasPlan = result.optimizedPlan?.root != null || result.originalPlan?.root != null
 
   const tabs: { id: ResultTab; label: string; badge?: number }[] = [
