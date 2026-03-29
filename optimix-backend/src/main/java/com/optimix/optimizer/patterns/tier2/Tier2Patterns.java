@@ -563,69 +563,55 @@ public class Tier2Patterns {
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect)) return false;
-            PlainSelect ps = (PlainSelect) sBody;
+            if (!(sBody instanceof PlainSelect ps)) return false;
             if (ps.getWhere() == null) return false;
-            
-            // We need at least 2 ANDed conditions to form a transitive link
-            List<Expression> ands = AstUtils.flattenAnds(ps.getWhere());
-            return ands.size() >= 2;
+            return AstUtils.flattenAnds(ps.getWhere()).size() >= 2;
         }
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            if (!detect(stmt, stats)) return Optional.empty();
             Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null) return Optional.empty();
             PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            if (body.getWhere() == null) return Optional.empty();
             
             List<Expression> ands = AstUtils.flattenAnds(body.getWhere());
             boolean modified = false;
 
-            // Find Col1 = Col2
             for (Expression e1 : ands) {
-                if (e1 instanceof EqualsTo eq1) {
-                    if (eq1.getLeftExpression() instanceof Column && eq1.getRightExpression() instanceof Column) {
-                        Column colA = (Column) eq1.getLeftExpression();
-                        Column colB = (Column) eq1.getRightExpression();
-                        
-                        // Find Col2 = Value
-                        for (Expression e2 : ands) {
-                            if (e1 == e2) continue;
-                            if (e2 instanceof EqualsTo eq2) {
-                                Column matchCol = null;
-                                Expression value = null;
-                                
-                                if (eq2.getLeftExpression() instanceof Column && !(eq2.getRightExpression() instanceof Column)) {
-                                    matchCol = (Column) eq2.getLeftExpression();
-                                    value = eq2.getRightExpression();
-                                } else if (eq2.getRightExpression() instanceof Column && !(eq2.getLeftExpression() instanceof Column)) {
-                                    matchCol = (Column) eq2.getRightExpression();
-                                    value = eq2.getLeftExpression();
-                                }
+                if (e1 instanceof EqualsTo eq1 && eq1.getLeftExpression() instanceof Column && eq1.getRightExpression() instanceof Column) {
+                    Column colA = (Column) eq1.getLeftExpression();
+                    Column colB = (Column) eq1.getRightExpression();
+                    
+                    for (Expression e2 : ands) {
+                        if (e1 == e2) continue;
+                        if (e2 instanceof EqualsTo eq2) {
+                            Column matchCol = null;
+                            Expression value = null;
+                            if (eq2.getLeftExpression() instanceof Column && !(eq2.getRightExpression() instanceof Column)) {
+                                matchCol = (Column) eq2.getLeftExpression(); value = eq2.getRightExpression();
+                            } else if (eq2.getRightExpression() instanceof Column && !(eq2.getLeftExpression() instanceof Column)) {
+                                matchCol = (Column) eq2.getRightExpression(); value = eq2.getLeftExpression();
+                            }
 
-                                if (matchCol != null && value != null) {
-                                    Column targetCol = null;
-                                    if (AstUtils.columnsEqual(matchCol, colA)) targetCol = colB;
-                                    else if (AstUtils.columnsEqual(matchCol, colB)) targetCol = colA;
+                            if (matchCol != null && value != null) {
+                                Column targetCol = null;
+                                if (AstUtils.columnsEqual(matchCol, colA)) targetCol = colB;
+                                else if (AstUtils.columnsEqual(matchCol, colB)) targetCol = colA;
 
-                                    if (targetCol != null) {
-                                        // Check if targetCol = value already exists
-                                        boolean exists = false;
-                                        for (Expression e3 : ands) {
-                                            if (e3 instanceof EqualsTo eq3) {
-                                                if ((AstUtils.expressionsEqual(eq3.getLeftExpression(), targetCol) && AstUtils.expressionsEqual(eq3.getRightExpression(), value)) ||
-                                                    (AstUtils.expressionsEqual(eq3.getRightExpression(), targetCol) && AstUtils.expressionsEqual(eq3.getLeftExpression(), value))) {
-                                                    exists = true;
-                                                    break;
-                                                }
+                                if (targetCol != null) {
+                                    boolean exists = false;
+                                    for (Expression e3 : ands) {
+                                        if (e3 instanceof EqualsTo eq3) {
+                                            if ((AstUtils.expressionsEqual(eq3.getLeftExpression(), targetCol) && AstUtils.expressionsEqual(eq3.getRightExpression(), value)) ||
+                                                (AstUtils.expressionsEqual(eq3.getRightExpression(), targetCol) && AstUtils.expressionsEqual(eq3.getLeftExpression(), value))) {
+                                                exists = true; break;
                                             }
                                         }
-                                        if (!exists) {
-                                            EqualsTo newEq = new EqualsTo(targetCol, value);
-                                            ands.add(newEq);
-                                            modified = true;
-                                            break; // restart to avoid concurrent mod
-                                        }
+                                    }
+                                    if (!exists) {
+                                        ands.add(new EqualsTo(targetCol, value));
+                                        modified = true; break;
                                     }
                                 }
                             }
@@ -660,9 +646,7 @@ public class Tier2Patterns {
             
             for (Join j : ps.getJoins()) {
                 String tName = AstUtils.getAliasOrName(j.getRightItem());
-                if (!seenTables.add(tName)) {
-                    return true; // Duplicate table found!
-                }
+                if (!seenTables.add(tName)) return true; // Duplicate table detected!
             }
             return false;
         }
@@ -672,7 +656,7 @@ public class Tier2Patterns {
             if (detect(stmt, stats)) {
                 return Optional.of(buildMeta(getId(), getName(), "Same table is joined multiple times unnecessarily.", "Flagged potential redundant self-join using AST topology analysis.", "LOW", "Prevents duplicate table scans.", stmt.toString(), stmt.toString(), 1.0));
             }
-            return Optional.empty(); // Detection only for safety. Auto-removing joins without proving foreign keys is unsafe.
+            return Optional.empty(); 
         }
     }
 
