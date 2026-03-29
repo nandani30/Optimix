@@ -30,11 +30,6 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 
-/**
- * Production-grade Tier 3 Optimization Patterns.
- * Focuses on Syntactic Polish, Redundancy Elimination, and Index Recommendation Triggers.
- * Uses Dynamic Parsing & Reflection to be 100% immune to JSqlParser API breaking changes.
- */
 public class Tier3Patterns {
     
     private static final Logger log = LoggerFactory.getLogger(Tier3Patterns.class);
@@ -59,9 +54,6 @@ public class Tier3Patterns {
         );
     }
 
-    // =========================================================================
-    // UTILITY & SAFETY HELPER
-    // =========================================================================
     static class AstUtils {
         public static Statement cloneAst(Statement original) {
             if (original == null) return null;
@@ -96,12 +88,6 @@ public class Tier3Patterns {
             return root;
         }
         
-        public static boolean isLikelyPrimaryKey(Column col) {
-            if (col == null || col.getColumnName() == null) return false;
-            String name = col.getColumnName().toLowerCase();
-            return name.equals("id") || name.endsWith("_id") || name.endsWith("uuid");
-        }
-        
         public static String getPrimaryKeyColumn(TableStatistics stats) {
             if (stats == null || stats.columns == null) return null;
             for (TableStatistics.ColumnStats col : stats.columns) {
@@ -123,6 +109,43 @@ public class Tier3Patterns {
             }
             return "";
         }
+
+        public static PlainSelect getSubSelectBody(Expression expr) {
+            if (expr == null) return null;
+            try {
+                Object select = expr.getClass().getMethod("getSelect").invoke(expr);
+                if (select instanceof Select && ((Select)select).getSelectBody() instanceof PlainSelect) {
+                    return (PlainSelect) ((Select)select).getSelectBody();
+                }
+                if (select instanceof PlainSelect) return (PlainSelect) select;
+            } catch (Exception e) {}
+            try {
+                Object body = expr.getClass().getMethod("getSelectBody").invoke(expr);
+                if (body instanceof PlainSelect) return (PlainSelect) body;
+            } catch (Exception e) {}
+            return null;
+        }
+
+        public static PlainSelect getSubSelectBodyFromItem(FromItem fromItem) {
+            if (fromItem == null) return null;
+            try {
+                Object select = fromItem.getClass().getMethod("getSelect").invoke(fromItem);
+                if (select instanceof Select && ((Select)select).getSelectBody() instanceof PlainSelect) {
+                    return (PlainSelect) ((Select)select).getSelectBody();
+                }
+                if (select instanceof PlainSelect) return (PlainSelect) select;
+            } catch (Exception e) {}
+            try {
+                Object body = fromItem.getClass().getMethod("getSelectBody").invoke(fromItem);
+                if (body instanceof PlainSelect) return (PlainSelect) body;
+            } catch (Exception e) {}
+            return null;
+        }
+
+        public static Expression getExpression(Object selectItem) {
+            try { return (Expression) selectItem.getClass().getMethod("getExpression").invoke(selectItem); } 
+            catch (Exception e) { return null; }
+        }
     }
 
     private static OptimizationResult.PatternApplication buildMeta(String id, String name, String problem, 
@@ -141,45 +164,69 @@ public class Tier3Patterns {
         return app;
     }
 
-    // =========================================================================
-    // PATTERNS
-    // =========================================================================
-
+    // --- ALREADY HANDLED LEXICALLY (Stubs remain for UI detection) ---
     static class P26_SelectStar implements OptimizationPattern {
-        @Override
-        public String getId() { return "P26_SELECT_STAR"; }
-        @Override
-        public String getName() { return "SELECT * Projection Warning"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            String sql = stmt.toString().toUpperCase();
-            return sql.contains("SELECT *") || sql.contains("SELECT \n*");
-        }
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            // Cannot logically rewrite without application context. Detection only.
-            return Optional.empty(); 
-        }
+        @Override public String getId() { return "P26_SELECT_STAR"; }
+        @Override public String getName() { return "SELECT * Projection Warning"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return stmt.toString().toUpperCase().contains("SELECT *"); }
+        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+    }
+    static class P28_ExpressionSimplification implements OptimizationPattern {
+        @Override public String getId() { return "P28_EXPR_SIMPLIFICATION"; }
+        @Override public String getName() { return "Expression Simplification"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+    }
+    static class P30_AlgebraicIdentity implements OptimizationPattern {
+        @Override public String getId() { return "P30_ALGEBRAIC_IDENTITY"; }
+        @Override public String getName() { return "Algebraic Identity"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+    }
+    static class P31_InListFlatten implements OptimizationPattern {
+        @Override public String getId() { return "P31_IN_LIST_FLATTEN"; }
+        @Override public String getName() { return "IN List Flattening"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+    }
+    static class P33_BooleanNormalization implements OptimizationPattern {
+        @Override public String getId() { return "P33_BOOLEAN_NORM"; }
+        @Override public String getName() { return "Boolean Normalization"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+    }
+    static class P38_ScalarToJoin implements OptimizationPattern {
+        @Override public String getId() { return "P38_SCALAR_TO_JOIN"; }
+        @Override public String getName() { return "Scalar to Join"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+    }
+    static class P39_Sargability implements OptimizationPattern {
+        @Override public String getId() { return "P39_SARGABILITY"; }
+        @Override public String getName() { return "SARGability"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
     }
 
-    static class P27_ConstantFolding implements OptimizationPattern {
-        @Override
-        public String getId() { return "P27_CONSTANT_FOLDING"; }
-        @Override
-        public String getName() { return "Constant Folding (1=1 Removal)"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
 
+    // --- IMPLEMENTED AST PATTERNS ---
+
+    static class P27_ConstantFolding implements OptimizationPattern {
+        @Override public String getId() { return "P27_CONSTANT_FOLDING"; }
+        @Override public String getName() { return "Constant Folding (1=1 Removal)"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             String sql = stmt.toString().replaceAll("\\s+", "");
             return sql.contains("1=1") || sql.contains("'a'='a'");
         }
-
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
@@ -204,11 +251,8 @@ public class Tier3Patterns {
             }
 
             if (modified) {
-                if (ands.isEmpty()) {
-                    body.setWhere(null);
-                } else {
-                    body.setWhere(AstUtils.buildAndTree(ands));
-                }
+                if (ands.isEmpty()) body.setWhere(null);
+                else body.setWhere(AstUtils.buildAndTree(ands));
                 
                 String finalSql = cloned.toString();
                 if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
@@ -219,33 +263,10 @@ public class Tier3Patterns {
         }
     }
 
-    static class P28_ExpressionSimplification implements OptimizationPattern {
-        @Override
-        public String getId() { return "P28_EXPR_SIMPLIFICATION"; }
-        @Override
-        public String getName() { return "Expression Simplification"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            return stmt.toString().toUpperCase().contains(" NOT (");
-        }
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            return Optional.empty(); // Handled physically by DB engine
-        }
-    }
-
     static class P29_RedundantFilter implements OptimizationPattern {
-        @Override
-        public String getId() { return "P29_REDUNDANT_FILTER"; }
-        @Override
-        public String getName() { return "Redundant Filter Elimination"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
-
+        @Override public String getId() { return "P29_REDUNDANT_FILTER"; }
+        @Override public String getName() { return "Redundant Filter Elimination"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
@@ -261,7 +282,6 @@ public class Tier3Patterns {
             }
             return false;
         }
-
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
@@ -293,73 +313,75 @@ public class Tier3Patterns {
         }
     }
 
-    static class P30_AlgebraicIdentity implements OptimizationPattern {
-        @Override
-        public String getId() { return "P30_ALGEBRAIC_IDENTITY"; }
-        @Override
-        public String getName() { return "Algebraic Identity"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
-    }
-
-    static class P31_InListFlatten implements OptimizationPattern {
-        @Override
-        public String getId() { return "P31_IN_LIST_FLATTEN"; }
-        @Override
-        public String getName() { return "IN List Flattening"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
-    }
-
+    // 🔴 NEWLY IMPLEMENTED: P32 Nullability Contradiction 🔴
     static class P32_NullabilityPropagation implements OptimizationPattern {
-        @Override
-        public String getId() { return "P32_NULLABILITY_PROP"; }
-        @Override
-        public String getName() { return "Nullability Propagation"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
+        @Override public String getId() { return "P32_NULLABILITY_PROP"; }
+        @Override public String getName() { return "Nullability Contradiction"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
 
         @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
+            
+            String whereStr = ps.getWhere().toString().toUpperCase();
+            return whereStr.contains("IS NULL") && whereStr.contains("=");
+        }
 
         @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
-    }
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
 
-    static class P33_BooleanNormalization implements OptimizationPattern {
-        @Override
-        public String getId() { return "P33_BOOLEAN_NORM"; }
-        @Override
-        public String getName() { return "Boolean Normalization"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
+            if (body.getWhere() == null) return Optional.empty();
+            
+            List<Expression> ands = AstUtils.flattenAnds(body.getWhere());
+            boolean modified = false;
+            Set<String> nullCols = new HashSet<>();
+            Set<String> eqCols = new HashSet<>();
 
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+            for (Expression expr : ands) {
+                if (expr instanceof net.sf.jsqlparser.expression.operators.relational.IsNullExpression) {
+                    net.sf.jsqlparser.expression.operators.relational.IsNullExpression isNull = (net.sf.jsqlparser.expression.operators.relational.IsNullExpression) expr;
+                    if (!isNull.isNot() && isNull.getLeftExpression() instanceof Column) {
+                        nullCols.add(((Column)isNull.getLeftExpression()).getFullyQualifiedName().toLowerCase());
+                    }
+                }
+                if (expr instanceof EqualsTo) {
+                    EqualsTo eq = (EqualsTo) expr;
+                    if (eq.getLeftExpression() instanceof Column) {
+                        eqCols.add(((Column)eq.getLeftExpression()).getFullyQualifiedName().toLowerCase());
+                    } else if (eq.getRightExpression() instanceof Column) {
+                        eqCols.add(((Column)eq.getRightExpression()).getFullyQualifiedName().toLowerCase());
+                    }
+                }
+            }
 
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+            for (String col : nullCols) {
+                if (eqCols.contains(col)) { modified = true; break; }
+            }
+
+            if (modified) {
+                try {
+                    body.setWhere(CCJSqlParserUtil.parseCondExpression("1 = 0"));
+                    String finalSql = cloned.toString();
+                    if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
+                        return Optional.of(buildMeta(getId(), getName(), "Column is checked for both IS NULL and equality, which is a mathematical contradiction.", "Short-circuited WHERE clause to 1=0.", "HIGH", "Prevents impossible table scans from executing.", stmt.toString(), finalSql, 1.0));
+                    }
+                } catch (Exception e) {}
+            }
+            return Optional.empty();
+        }
     }
 
     static class P34_ShortCircuit implements OptimizationPattern {
-        @Override
-        public String getId() { return "P34_SHORT_CIRCUIT"; }
-        @Override
-        public String getName() { return "Short Circuit Evaluation"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
+        @Override public String getId() { return "P34_SHORT_CIRCUIT"; }
+        @Override public String getName() { return "Short Circuit Evaluation"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
@@ -395,51 +417,112 @@ public class Tier3Patterns {
                     if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
                         return Optional.of(buildMeta(getId(), getName(), "Query contains a known FALSE condition (1=0) ANDed with other expensive conditions.", "Short-circuited entire WHERE clause to 1=0.", "HIGH", "Prevents database from evaluating any other conditions since the row is already mathematically rejected.", stmt.toString(), finalSql, 1.0));
                     }
-                } catch (Exception e) {
-                    log.debug("P34_ShortCircuit rewrite failed: {}", e.getMessage());
+                } catch (Exception e) {}
+            }
+            return Optional.empty();
+        }
+    }
+
+    // 🔴 NEWLY IMPLEMENTED: P35 Limit Pushdown 🔴
+    static class P35_LimitPushdown implements OptimizationPattern {
+        @Override public String getId() { return "P35_LIMIT_PUSHDOWN"; }
+        @Override public String getName() { return "LIMIT Pushdown"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getLimit() == null) return false;
+            return AstUtils.getSubSelectBodyFromItem(ps.getFromItem()) != null;
+        }
+
+        @Override
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            
+            if (body.getLimit() == null) return Optional.empty();
+
+            PlainSelect inner = AstUtils.getSubSelectBodyFromItem(body.getFromItem());
+            if (inner != null && inner.getLimit() == null) {
+                inner.setLimit(body.getLimit());
+                String finalSql = cloned.toString();
+                if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
+                    return Optional.of(buildMeta(getId(), getName(), "Outer query restricts rows, but inner subquery scans exhaustively.", "Pushed LIMIT into the nested subquery.", "MEDIUM", "Reduces intermediate row generation and memory allocation.", stmt.toString(), finalSql, 1.0));
                 }
             }
             return Optional.empty();
         }
     }
 
-    static class P35_LimitPushdown implements OptimizationPattern {
-        @Override
-        public String getId() { return "P35_LIMIT_PUSHDOWN"; }
-        @Override
-        public String getName() { return "LIMIT Pushdown"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; } // Addressed by P09
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
-    }
-
+    // 🔴 NEWLY IMPLEMENTED: P36 Duplicate Subquery 🔴
     static class P36_DuplicateSubquery implements OptimizationPattern {
-        @Override
-        public String getId() { return "P36_DUPLICATE_SUBQUERY"; }
-        @Override
-        public String getName() { return "Duplicate Subquery Elimination"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
+        @Override public String getId() { return "P36_DUPLICATE_SUBQUERY"; }
+        @Override public String getName() { return "Duplicate Subquery Elimination"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
 
         @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            
+            if (ps.getSelectItems() == null) return false;
+            Set<String> seen = new HashSet<>();
+            for (Object obj : ps.getSelectItems()) {
+                Expression expr = AstUtils.getExpression(obj);
+                PlainSelect inner = AstUtils.getSubSelectBody(expr);
+                if (inner != null) {
+                    if (!seen.add(inner.toString())) return true;
+                }
+            }
+            return false;
+        }
 
         @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+        @SuppressWarnings("rawtypes")
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            
+            if (body.getSelectItems() == null) return Optional.empty();
+            
+            boolean modified = false;
+            Set<String> seen = new HashSet<>();
+            Iterator it = body.getSelectItems().iterator();
+            
+            while(it.hasNext()) {
+                Object obj = it.next();
+                Expression expr = AstUtils.getExpression(obj);
+                PlainSelect inner = AstUtils.getSubSelectBody(expr);
+                if (inner != null) {
+                    if (!seen.add(inner.toString())) {
+                        it.remove();
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified) {
+                String finalSql = cloned.toString();
+                if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
+                    return Optional.of(buildMeta(getId(), getName(), "Identical subqueries execute multiple times per row.", "Eliminated duplicate scalar subqueries from projection.", "LOW", "Reduces repeated redundant CPU calculations.", stmt.toString(), finalSql, 1.0));
+                }
+            }
+            return Optional.empty();
+        }
     }
 
     static class P37_ImplicitJoin implements OptimizationPattern {
-        @Override
-        public String getId() { return "P37_IMPLICIT_JOIN"; }
-        @Override
-        public String getName() { return "Implicit to Explicit JOIN Conversion"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
+        @Override public String getId() { return "P37_IMPLICIT_JOIN"; }
+        @Override public String getName() { return "Implicit to Explicit JOIN Conversion"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
@@ -462,7 +545,6 @@ public class Tier3Patterns {
 
             for (Join join : body.getJoins()) {
                 try {
-                    // Check if it's a comma join via reflection
                     boolean isSimple = (boolean) join.getClass().getMethod("isSimple").invoke(join);
                     if (isSimple) {
                         Iterator<Expression> it = ands.iterator();
@@ -518,49 +600,10 @@ public class Tier3Patterns {
         }
     }
 
-    static class P38_ScalarToJoin implements OptimizationPattern {
-        @Override
-        public String getId() { return "P38_SCALAR_TO_JOIN"; }
-        @Override
-        public String getName() { return "Scalar to Join"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; } // Handled by P01
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
-    }
-
-    static class P39_Sargability implements OptimizationPattern {
-        @Override
-        public String getId() { return "P39_SARGABILITY"; }
-        @Override
-        public String getName() { return "SARGability"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; } // Handled by P14
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // P40 - THE INDEX TRIGGER
-    // This pattern does NOT mutate the AST. It detects missing PKs on filtered 
-    // columns and returns metadata. The Engine sees the ID "P40_MISSING_INDEX" 
-    // and triggers the `buildIndexRecommendations()` engine phase.
-    // ─────────────────────────────────────────────────────────────────────────
     static class P40_MissingIndex implements OptimizationPattern {
-        @Override
-        public String getId() { return "P40_MISSING_INDEX"; }
-        @Override
-        public String getName() { return "Missing Index Recommendation Trigger"; }
-        @Override
-        public Tier getTier() { return Tier.TIER3; }
+        @Override public String getId() { return "P40_MISSING_INDEX"; }
+        @Override public String getName() { return "Missing Index Recommendation Trigger"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
@@ -581,7 +624,6 @@ public class Tier3Patterns {
                         if (stats.containsKey(tableName)) {
                             TableStatistics tStats = stats.get(tableName);
                             String pk = AstUtils.getPrimaryKeyColumn(tStats);
-                            // If we filter on a column that isn't the primary key, trigger P40
                             if (pk != null && !pk.equalsIgnoreCase(col.getColumnName())) {
                                 missingIndexDetected[0] = true;
                             }
@@ -596,7 +638,6 @@ public class Tier3Patterns {
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             if (detect(stmt, stats)) {
-                // Return identical before/after SQL to safely trigger the Engine's Index Builder
                 return Optional.of(buildMeta(getId(), getName(), "Full table scan detected on unindexed WHERE column.", "Dynamically generating optimal CREATE INDEX statements.", "HIGH", "B-Tree indexes turn O(N) full table scans into O(log N) lookups.", stmt.toString(), stmt.toString(), 1.0));
             }
             return Optional.empty();
