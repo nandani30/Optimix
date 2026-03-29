@@ -58,9 +58,15 @@ export default function HistoryPage() {
   })
 
   const formatDate = (iso: string) => {
-    const d = new Date(iso)
+    // Timezone Fix: Force browser to parse backend time as UTC so it converts to IST correctly
+    const dateStr = iso.endsWith('Z') ? iso : `${iso}Z`
+    const d = new Date(dateStr)
     const now = new Date()
     const diffMs = now.getTime() - d.getTime()
+    
+    // Prevent negative times if clock sync is slightly off
+    if (diffMs < 0) return 'just now'
+    
     const diffMins  = Math.floor(diffMs / 60_000)
     const diffHours = Math.floor(diffMs / 3_600_000)
     const diffDays  = Math.floor(diffMs / 86_400_000)
