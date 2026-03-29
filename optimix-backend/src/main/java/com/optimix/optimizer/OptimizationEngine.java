@@ -117,8 +117,10 @@ public class OptimizationEngine {
                             OptimizationResult.PatternApplication app = result.get();
                             
                             String normalizedAfter = normalizeSql(app.afterSnippet);
+                            boolean isWarningOnly = app.beforeSnippet.equals(app.afterSnippet);
                             
-                            if (!seenQueries.add(normalizedAfter)) {
+                            // Let Warnings pass through without triggering the infinite loop blocker
+                            if (!isWarningOnly && !seenQueries.add(normalizedAfter)) {
                                 continue; 
                             }
 
@@ -130,8 +132,11 @@ public class OptimizationEngine {
                             log.debug("Before [{}]: {}", pattern.getId(), app.beforeSnippet);
                             log.debug("After  [{}]: {}", pattern.getId(), app.afterSnippet);
                             
-                            stmt = CCJSqlParserUtil.parse(app.afterSnippet);
-                            changedInPass = true;
+                            // Only parse and loop again if the SQL actually mutated
+                            if (!isWarningOnly) {
+                                stmt = CCJSqlParserUtil.parse(app.afterSnippet);
+                                changedInPass = true;
+                            }
                         }
                     }
                 } catch (Exception e) {
