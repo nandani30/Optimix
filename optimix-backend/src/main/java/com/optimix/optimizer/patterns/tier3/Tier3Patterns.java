@@ -789,7 +789,11 @@ public class Tier3Patterns {
                     if (tableName != null && stats.containsKey(tableName)) {
                         TableStatistics tStats = stats.get(tableName);
                         String pk = AstUtils.getPrimaryKeyColumn(tStats);
-                        if (pk != null && !pk.equalsIgnoreCase(col.getColumnName())) missing[0] = true;
+                        
+                        // FIXED: If there is no primary key at all, OR the column doesn't match the primary key, trigger the warning!
+                        if (pk == null || !pk.equalsIgnoreCase(col.getColumnName())) {
+                            missing[0] = true;
+                        }
                     }
                 }
             });
@@ -799,7 +803,7 @@ public class Tier3Patterns {
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             if (detect(stmt, stats)) {
-                // COMPILER HACK: Append a harmless SQL comment so the engine registers a "change"
+                // COMPILER HACK: Append a harmless SQL comment so the engine registers a mathematical "change"
                 String optimizedSql = stmt.toString() + " /* OPTIMIX: INDEX RECOMMENDED */";
                 
                 return Optional.of(buildMeta(
