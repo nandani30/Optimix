@@ -163,143 +163,6 @@ public class Tier3Patterns {
         return app;
     }
 
-    static class P31_InListFlatten implements OptimizationPattern {
-        @Override public String getId() { return "P31_IN_LIST_FLATTEN"; }
-        @Override public String getName() { return "IN List Flattening"; }
-        @Override public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            if (!(stmt instanceof Select)) return false;
-            Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps)) return false;
-            if (ps.getWhere() == null) return false;
-            
-            boolean[] found = {false};
-            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
-                @Override
-                public void visit(net.sf.jsqlparser.expression.operators.relational.InExpression expr) {
-                    try {
-                        Object rightItems = expr.getClass().getMethod("getRightItemsList").invoke(expr);
-                        if (rightItems.getClass().getSimpleName().equals("ExpressionList")) {
-                            List<Expression> exprs = (List<Expression>) rightItems.getClass().getMethod("getExpressions").invoke(rightItems);
-                            Set<String> seen = new HashSet<>();
-                            for (Expression e : exprs) {
-                                if (!seen.add(e.toString())) found[0] = true;
-                            }
-                        }
-                    } catch (Exception e) {}
-                }
-            });
-            return found[0];
-        }
-
-        @Override
-        @SuppressWarnings("unchecked")
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            Statement cloned = AstUtils.cloneAst(stmt);
-            if (cloned == null) return Optional.empty();
-            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
-            if (body.getWhere() == null) return Optional.empty();
-
-            boolean[] modified = {false};
-            body.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
-                @Override
-                public void visit(net.sf.jsqlparser.expression.operators.relational.InExpression expr) {
-                    try {
-                        Object rightItems = expr.getClass().getMethod("getRightItemsList").invoke(expr);
-                        if (rightItems.getClass().getSimpleName().equals("ExpressionList")) {
-                            List<Expression> exprs = (List<Expression>) rightItems.getClass().getMethod("getExpressions").invoke(rightItems);
-                            Set<String> seen = new java.util.LinkedHashSet<>();
-                            List<Expression> unique = new ArrayList<>();
-                            for (Expression e : exprs) {
-                                if (seen.add(e.toString())) unique.add(e);
-                            }
-                            if (unique.size() < exprs.size()) {
-                                rightItems.getClass().getMethod("setExpressions", List.class).invoke(rightItems, unique);
-                                modified[0] = true;
-                            }
-                        }
-                    } catch (Exception e) {}
-                }
-            });
-
-            if (modified[0]) {
-                return Optional.of(buildMeta(getId(), getName(), "Duplicate values in IN lists waste evaluation time.", "Deduplicated IN list values via AST ExpressionList traversal.", "LOW", "Reduces comparison cycles.", stmt.toString(), cloned.toString(), 1.0));
-            }
-            return Optional.empty();
-        }
-    }
-
-    static class P33_BooleanNormalization implements OptimizationPattern {
-        @Override public String getId() { return "P33_BOOLEAN_NORM"; }
-        @Override public String getName() { return "Boolean Normalization"; }
-        @Override public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            if (!(stmt instanceof Select)) return false;
-            Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps)) return false;
-            if (ps.getWhere() == null) return false;
-            
-            boolean[] found = {false};
-            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
-                @Override
-                public void visit(net.sf.jsqlparser.expression.NotExpression expr) {
-                    if (expr.getExpression() instanceof net.sf.jsqlparser.expression.operators.relational.NotEqualsTo) {
-                        found[0] = true;
-                    }
-                }
-            });
-            return found[0];
-        }
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            Statement cloned = AstUtils.cloneAst(stmt);
-            if (cloned == null) return Optional.empty();
-            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
-            if (body.getWhere() == null) return Optional.empty();
-            
-            List<Expression> ands = AstUtils.flattenAnds(body.getWhere());
-            boolean modified = false;
-
-            for (int i = 0; i < ands.size(); i++) {
-                if (ands.get(i) instanceof net.sf.jsqlparser.expression.NotExpression notExpr) {
-                    if (notExpr.getExpression() instanceof net.sf.jsqlparser.expression.operators.relational.NotEqualsTo neq) {
-                        EqualsTo eq = new EqualsTo(neq.getLeftExpression(), neq.getRightExpression());
-                        ands.set(i, eq);
-                        modified = true;
-                    }
-                }
-            }
-
-            if (modified) {
-                body.setWhere(AstUtils.buildAndTree(ands));
-                return Optional.of(buildMeta(getId(), getName(), "Double negatives (NOT A != B) hinder index usage.", "Normalized to direct equality (A = B) via AST node replacement.", "LOW", "Restores SARGability.", stmt.toString(), cloned.toString(), 1.0));
-            }
-            return Optional.empty();
-        }
-    }
-
-    static class P38_ScalarToJoin implements OptimizationPattern {
-        @Override public String getId() { return "P38_SCALAR_TO_JOIN"; }
-        @Override public String getName() { return "Scalar to Join"; }
-        @Override public Tier getTier() { return Tier.TIER3; }
-
-        @Override
-        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            return false; // Handled by Tier 2 P13 logic safely to avoid duplicate triggering.
-        }
-
-        @Override
-        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            return Optional.empty(); 
-        }
-    }
-
-    // --- IMPLEMENTED PATTERNS ---
     static class P26_SelectStar implements OptimizationPattern {
         @Override public String getId() { return "P26_SELECT_STAR"; }
         @Override public String getName() { return "SELECT * Projection Warning"; }
@@ -381,8 +244,28 @@ public class Tier3Patterns {
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            String sql = stmt.toString().replaceAll("\\s+", "");
-            return sql.contains("+0") || sql.contains("*1");
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
+
+            boolean[] found = {false};
+            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
+                @Override
+                public void visit(net.sf.jsqlparser.expression.operators.arithmetic.Addition expr) {
+                    if (expr.getRightExpression() instanceof net.sf.jsqlparser.expression.LongValue) {
+                        if (((net.sf.jsqlparser.expression.LongValue) expr.getRightExpression()).getValue() == 0) found[0] = true;
+                    }
+                }
+                @Override
+                public void visit(net.sf.jsqlparser.expression.operators.arithmetic.Multiplication expr) {
+                    if (expr.getRightExpression() instanceof net.sf.jsqlparser.expression.LongValue) {
+                        if (((net.sf.jsqlparser.expression.LongValue) expr.getRightExpression()).getValue() == 1) found[0] = true;
+                    }
+                }
+            });
+            return found[0];
         }
 
         @Override
@@ -504,6 +387,75 @@ public class Tier3Patterns {
         }
     }
 
+    static class P31_InListFlatten implements OptimizationPattern {
+        @Override public String getId() { return "P31_IN_LIST_FLATTEN"; }
+        @Override public String getName() { return "IN List Flattening"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
+            
+            boolean[] found = {false};
+            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
+                @Override
+                public void visit(net.sf.jsqlparser.expression.operators.relational.InExpression expr) {
+                    try {
+                        Object rightItems = expr.getClass().getMethod("getRightItemsList").invoke(expr);
+                        if (rightItems.getClass().getSimpleName().equals("ExpressionList")) {
+                            List<Expression> exprs = (List<Expression>) rightItems.getClass().getMethod("getExpressions").invoke(rightItems);
+                            Set<String> seen = new HashSet<>();
+                            for (Expression e : exprs) {
+                                if (!seen.add(e.toString())) found[0] = true;
+                            }
+                        }
+                    } catch (Exception e) {}
+                }
+            });
+            return found[0];
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null) return Optional.empty();
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            if (body.getWhere() == null) return Optional.empty();
+
+            boolean[] modified = {false};
+            body.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
+                @Override
+                public void visit(net.sf.jsqlparser.expression.operators.relational.InExpression expr) {
+                    try {
+                        Object rightItems = expr.getClass().getMethod("getRightItemsList").invoke(expr);
+                        if (rightItems.getClass().getSimpleName().equals("ExpressionList")) {
+                            List<Expression> exprs = (List<Expression>) rightItems.getClass().getMethod("getExpressions").invoke(rightItems);
+                            Set<String> seen = new java.util.LinkedHashSet<>();
+                            List<Expression> unique = new ArrayList<>();
+                            for (Expression e : exprs) {
+                                if (seen.add(e.toString())) unique.add(e);
+                            }
+                            if (unique.size() < exprs.size()) {
+                                rightItems.getClass().getMethod("setExpressions", List.class).invoke(rightItems, unique);
+                                modified[0] = true;
+                            }
+                        }
+                    } catch (Exception e) {}
+                }
+            });
+
+            if (modified[0]) {
+                return Optional.of(buildMeta(getId(), getName(), "Duplicate values in IN lists waste evaluation time.", "Deduplicated IN list values via AST ExpressionList traversal.", "LOW", "Reduces comparison cycles.", stmt.toString(), cloned.toString(), 1.0));
+            }
+            return Optional.empty();
+        }
+    }
+
     static class P32_NullabilityPropagation implements OptimizationPattern {
         @Override public String getId() { return "P32_NULLABILITY_PROP"; }
         @Override public String getName() { return "Nullability Contradiction"; }
@@ -566,6 +518,61 @@ public class Tier3Patterns {
                         return Optional.of(buildMeta(getId(), getName(), "Column is checked for both IS NULL and equality, which is a mathematical contradiction.", "Short-circuited WHERE clause to 1=0.", "HIGH", "Prevents impossible table scans from executing.", stmt.toString(), finalSql, 1.0));
                     }
                 } catch (Exception e) {}
+            }
+            return Optional.empty();
+        }
+    }
+
+    static class P33_BooleanNormalization implements OptimizationPattern {
+        @Override public String getId() { return "P33_BOOLEAN_NORM"; }
+        @Override public String getName() { return "Boolean Normalization"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
+            
+            boolean[] found = {false};
+            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
+                @Override
+                public void visit(net.sf.jsqlparser.expression.NotExpression expr) {
+                    if (expr.getExpression() instanceof net.sf.jsqlparser.expression.operators.relational.NotEqualsTo) {
+                        found[0] = true;
+                    }
+                }
+            });
+            return found[0];
+        }
+
+        @Override
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null) return Optional.empty();
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            if (body.getWhere() == null) return Optional.empty();
+            
+            List<Expression> ands = AstUtils.flattenAnds(body.getWhere());
+            boolean modified = false;
+
+            for (int i = 0; i < ands.size(); i++) {
+                if (ands.get(i) instanceof net.sf.jsqlparser.expression.NotExpression) {
+                    net.sf.jsqlparser.expression.NotExpression notExpr = (net.sf.jsqlparser.expression.NotExpression) ands.get(i);
+                    if (notExpr.getExpression() instanceof net.sf.jsqlparser.expression.operators.relational.NotEqualsTo) {
+                        net.sf.jsqlparser.expression.operators.relational.NotEqualsTo neq = (net.sf.jsqlparser.expression.operators.relational.NotEqualsTo) notExpr.getExpression();
+                        EqualsTo eq = new EqualsTo(neq.getLeftExpression(), neq.getRightExpression());
+                        ands.set(i, eq);
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified) {
+                body.setWhere(AstUtils.buildAndTree(ands));
+                return Optional.of(buildMeta(getId(), getName(), "Double negatives (NOT A != B) hinder index usage.", "Normalized to direct equality (A = B) via AST node replacement.", "LOW", "Restores SARGability.", stmt.toString(), cloned.toString(), 1.0));
             }
             return Optional.empty();
         }
@@ -791,6 +798,22 @@ public class Tier3Patterns {
         }
     }
 
+    static class P38_ScalarToJoin implements OptimizationPattern {
+        @Override public String getId() { return "P38_SCALAR_TO_JOIN"; }
+        @Override public String getName() { return "Scalar to Join"; }
+        @Override public Tier getTier() { return Tier.TIER3; }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            return false; // Handled by Tier 2 P13 logic safely to avoid duplicate triggering.
+        }
+
+        @Override
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            return Optional.empty(); 
+        }
+    }
+
     static class P39_Sargability implements OptimizationPattern {
         @Override public String getId() { return "P39_SARGABILITY"; }
         @Override public String getName() { return "SARGability"; }
@@ -798,8 +821,23 @@ public class Tier3Patterns {
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            String sql = stmt.toString().toUpperCase();
-            return sql.contains("LIKE '%");
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
+
+            boolean[] found = {false};
+            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
+                @Override
+                public void visit(net.sf.jsqlparser.expression.operators.relational.LikeExpression expr) {
+                    if (expr.getRightExpression() instanceof net.sf.jsqlparser.expression.StringValue) {
+                        String val = ((net.sf.jsqlparser.expression.StringValue) expr.getRightExpression()).getValue();
+                        if (val.startsWith("%") && !val.equals("%")) found[0] = true;
+                    }
+                }
+            });
+            return found[0];
         }
 
         @Override
