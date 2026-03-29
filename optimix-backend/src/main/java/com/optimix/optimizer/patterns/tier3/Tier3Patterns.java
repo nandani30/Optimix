@@ -182,9 +182,51 @@ public class Tier3Patterns {
         }
 
         @Override
+        @SuppressWarnings({"rawtypes", "unchecked"})
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            if (detect(stmt, stats)) {
-                return Optional.of(buildMeta(getId(), getName(), "SELECT * fetches unnecessary columns, wasting memory.", "Identified SELECT * via AST AllColumns detection.", "LOW", "Reduces network I/O and memory allocation.", stmt.toString(), stmt.toString(), 1.0));
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null || !(cloned instanceof Select s) || !(s.getSelectBody() instanceof PlainSelect body)) return Optional.empty();
+            if (body.getSelectItems() == null) return Optional.empty();
+
+            String replacementCol = "id"; // Universal fallback
+            
+            // Dynamically look up the primary key from the table metadata
+            String tableName = AstUtils.getAliasOrName(body.getFromItem());
+            if (!tableName.isEmpty() && stats != null && stats.containsKey(tableName)) {
+                TableStatistics tStats = stats.get(tableName);
+                String pk = AstUtils.getPrimaryKeyColumn(tStats);
+                if (pk != null) {
+                    replacementCol = pk;
+                } else if (tStats.columns != null && !tStats.columns.isEmpty()) {
+                    replacementCol = tStats.columns.get(0).columnName; // Fallback to first available column
+                }
+            }
+
+            boolean modified = false;
+            try {
+                List newItems = new ArrayList<>();
+                for (Object item : body.getSelectItems()) {
+                    if (item.getClass().getSimpleName().contains("AllColumns") || item.toString().contains("*")) {
+                        // Dynamically parse the replacement column into an AST node
+                        Select tempSel = (Select) CCJSqlParserUtil.parse("SELECT " + replacementCol);
+                        newItems.add(((PlainSelect) tempSel.getSelectBody()).getSelectItems().get(0));
+                        modified = true;
+                    } else {
+                        newItems.add(item);
+                    }
+                }
+                
+                if (modified) {
+                    body.getSelectItems().clear();
+                    body.getSelectItems().addAll(newItems);
+                }
+            } catch (Exception e) {}
+
+            if (modified) {
+                String finalSql = cloned.toString();
+                if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
+                    return Optional.of(buildMeta(getId(), getName(), "SELECT * fetches unnecessary columns, wasting memory.", "Replaced SELECT * with explicit Primary Key column.", "LOW", "Reduces network I/O and memory allocation.", stmt.toString(), finalSql, 1.0));
+                }
             }
             return Optional.empty();
         }
@@ -244,7 +286,36 @@ public class Tier3Patterns {
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            if (detect(stmt, stats)) return Optional.of(buildMeta(getId(), getName(), "Useless algebraic operations (+0, *1) slow down execution.", "Flagged mathematically neutral operations for review.", "LOW", "Reduces CPU cycles.", stmt.toString(), stmt.toString(), 1.0));
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null || !(cloned instanceof Select s) || !(s.getSelectBody() instanceof PlainSelect body) || body.getWhere() == null) return Optional.empty();
+
+            List<Expression> ands = AstUtils.flattenAnds(body.getWhere());
+            boolean modified = false;
+
+            for (int i = 0; i < ands.size(); i++) {
+                Expression expr = ands.get(i);
+                if (expr instanceof EqualsTo eq) {
+                    Expression left = eq.getLeftExpression();
+                    Expression right = eq.getRightExpression();
+                    
+                    // Rip the useless math out of the AST node
+                    if (left instanceof Addition add && add.getRightExpression() instanceof LongValue l && l.getValue() == 0) {
+                        ands.set(i, new EqualsTo(add.getLeftExpression(), right));
+                        modified = true;
+                    } else if (left instanceof Multiplication mult && mult.getRightExpression() instanceof LongValue l && l.getValue() == 1) {
+                        ands.set(i, new EqualsTo(mult.getLeftExpression(), right));
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified) {
+                body.setWhere(AstUtils.buildAndTree(ands));
+                String finalSql = cloned.toString();
+                if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
+                    return Optional.of(buildMeta(getId(), getName(), "Useless algebraic operations (+0, *1) slow down execution.", "Removed mathematically neutral operations via AST mutation.", "LOW", "Reduces CPU cycles.", stmt.toString(), finalSql, 1.0));
+                }
+            }
             return Optional.empty();
         }
     }
@@ -338,10 +409,11 @@ public class Tier3Patterns {
                 @Override public void visit(net.sf.jsqlparser.expression.operators.relational.InExpression expr) {
                     try {
                         Object rightItems = expr.getClass().getMethod("getRightItemsList").invoke(expr);
-                        if (rightItems.getClass().getSimpleName().equals("ExpressionList")) {
-                            List<Expression> exprs = (List<Expression>) rightItems.getClass().getMethod("getExpressions").invoke(rightItems);
-                            Set<String> seen = new HashSet<>();
-                            for (Expression e : exprs) if (!seen.add(e.toString())) found[0] = true;
+                        String listStr = rightItems.toString();
+                        if (listStr.startsWith("(") && listStr.endsWith(")")) {
+                            String[] parts = listStr.substring(1, listStr.length() - 1).split(",");
+                            Set<String> unique = new HashSet<>();
+                            for (String p : parts) if (!unique.add(p.trim())) found[0] = true;
                         }
                     } catch (Exception e) {}
                 }
@@ -350,31 +422,37 @@ public class Tier3Patterns {
         }
 
         @Override
-        @SuppressWarnings("unchecked")
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select s) || !(s.getSelectBody() instanceof PlainSelect body) || body.getWhere() == null) return Optional.empty();
 
-            boolean[] modified = {false};
-            body.getWhere().accept(new ExpressionVisitorAdapter() {
-                @Override public void visit(net.sf.jsqlparser.expression.operators.relational.InExpression expr) {
+            List<Expression> ands = AstUtils.flattenAnds(body.getWhere());
+            boolean modified = false;
+
+            for (int i = 0; i < ands.size(); i++) {
+                if (ands.get(i) instanceof net.sf.jsqlparser.expression.operators.relational.InExpression expr) {
                     try {
                         Object rightItems = expr.getClass().getMethod("getRightItemsList").invoke(expr);
-                        if (rightItems.getClass().getSimpleName().equals("ExpressionList")) {
-                            List<Expression> exprs = (List<Expression>) rightItems.getClass().getMethod("getExpressions").invoke(rightItems);
-                            Set<String> seen = new LinkedHashSet<>();
-                            List<Expression> unique = new ArrayList<>();
-                            for (Expression e : exprs) if (seen.add(e.toString())) unique.add(e);
-                            if (unique.size() < exprs.size()) {
-                                rightItems.getClass().getMethod("setExpressions", List.class).invoke(rightItems, unique);
-                                modified[0] = true;
+                        String listStr = rightItems.toString();
+                        if (listStr.startsWith("(") && listStr.endsWith(")")) {
+                            String[] parts = listStr.substring(1, listStr.length() - 1).split(",");
+                            Set<String> unique = new LinkedHashSet<>();
+                            for (String p : parts) unique.add(p.trim());
+                            
+                            if (unique.size() < parts.length) {
+                                String newIn = expr.getLeftExpression().toString() + (expr.isNot() ? " NOT IN " : " IN ") + "(" + String.join(", ", unique) + ")";
+                                ands.set(i, CCJSqlParserUtil.parseCondExpression(newIn));
+                                modified = true;
                             }
                         }
                     } catch (Exception e) {}
                 }
-            });
+            }
 
-            if (modified[0]) return Optional.of(buildMeta(getId(), getName(), "Duplicate values in IN lists waste evaluation time.", "Deduplicated IN list values via AST ExpressionList traversal.", "LOW", "Reduces comparison cycles.", stmt.toString(), cloned.toString(), 1.0));
+            if (modified) {
+                body.setWhere(AstUtils.buildAndTree(ands));
+                return Optional.of(buildMeta(getId(), getName(), "Duplicate values in IN lists waste evaluation time.", "Deduplicated IN list values via AST string mutation.", "LOW", "Reduces comparison cycles.", stmt.toString(), cloned.toString(), 1.0));
+            }
             return Optional.empty();
         }
     }
@@ -436,7 +514,9 @@ public class Tier3Patterns {
             boolean[] found = {false};
             ps.getWhere().accept(new ExpressionVisitorAdapter() {
                 @Override public void visit(net.sf.jsqlparser.expression.NotExpression expr) {
-                    if (expr.getExpression() instanceof NotEqualsTo) found[0] = true;
+                    Expression inner = expr.getExpression();
+                    if (inner instanceof net.sf.jsqlparser.expression.Parenthesis p) inner = p.getExpression();
+                    if (inner instanceof NotEqualsTo) found[0] = true;
                 }
             });
             return found[0];
@@ -451,9 +531,14 @@ public class Tier3Patterns {
             boolean modified = false;
 
             for (int i = 0; i < ands.size(); i++) {
-                if (ands.get(i) instanceof net.sf.jsqlparser.expression.NotExpression notExpr && notExpr.getExpression() instanceof NotEqualsTo neq) {
-                    ands.set(i, new EqualsTo(neq.getLeftExpression(), neq.getRightExpression()));
-                    modified = true;
+                if (ands.get(i) instanceof net.sf.jsqlparser.expression.NotExpression notExpr) {
+                    Expression inner = notExpr.getExpression();
+                    if (inner instanceof net.sf.jsqlparser.expression.Parenthesis p) inner = p.getExpression();
+                    
+                    if (inner instanceof NotEqualsTo neq) {
+                        ands.set(i, new EqualsTo(neq.getLeftExpression(), neq.getRightExpression()));
+                        modified = true;
+                    }
                 }
             }
 
@@ -694,8 +779,15 @@ public class Tier3Patterns {
             boolean[] missing = {false};
             ps.getWhere().accept(new ExpressionVisitorAdapter() {
                 @Override public void visit(Column col) {
+                    String tableName = null;
                     if (col.getTable() != null && col.getTable().getName() != null) {
-                        TableStatistics tStats = stats.get(col.getTable().getName().toLowerCase());
+                        tableName = col.getTable().getName().toLowerCase();
+                    } else if (ps.getFromItem() != null) {
+                        tableName = AstUtils.getAliasOrName(ps.getFromItem());
+                    }
+                    
+                    if (tableName != null && stats.containsKey(tableName)) {
+                        TableStatistics tStats = stats.get(tableName);
                         String pk = AstUtils.getPrimaryKeyColumn(tStats);
                         if (pk != null && !pk.equalsIgnoreCase(col.getColumnName())) missing[0] = true;
                     }
