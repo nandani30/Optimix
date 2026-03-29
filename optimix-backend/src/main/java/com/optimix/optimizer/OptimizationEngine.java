@@ -157,10 +157,9 @@ public class OptimizationEngine {
         double costAfter = calculateHeuristicCost(optimizedSql, stats);
         boolean queryChanged = !optimizedSql.equals(sql);
 
-        // CRITICAL FIX: Only revert if the optimization made the cost STRICTLY WORSE.
-        // If costAfter == costBefore, we keep the semantic improvement!
+        // THE HONEST GUARD: Only revert if the optimization made the cost WORSE.
         if (queryChanged && costAfter > costBefore) {
-            log.warn("CBO Guard Triggered: Optimized cost ({}) > Original cost ({}). Reverting changes to prevent regression.", costAfter, costBefore);
+            log.warn("CBO Guard Triggered: Reverting changes to prevent regression.");
             optimizedSql = sql;
             queryChanged = false;
             applied.clear();
