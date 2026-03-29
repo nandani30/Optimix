@@ -665,7 +665,13 @@ public class Tier1Patterns {
             Object sBody = ((Select) stmt).getSelectBody();
             if (!(sBody instanceof PlainSelect ps)) return false;
             
-            return ps.getJoins() != null && ps.getJoins().size() == 1 && AstUtils.getGroupBy(ps) != null && AstUtils.hasAggregates(ps);
+            if (ps.getJoins() == null || ps.getJoins().size() != 1) return false;
+            if (AstUtils.getGroupBy(ps) == null || !AstUtils.hasAggregates(ps)) return false;
+            
+            // CRITICAL FIX: Prevent infinite loops by only triggering if the right side is a base Table, not a Subquery
+            if (!(ps.getJoins().get(0).getRightItem() instanceof Table)) return false;
+            
+            return true;
         }
 
         @Override
