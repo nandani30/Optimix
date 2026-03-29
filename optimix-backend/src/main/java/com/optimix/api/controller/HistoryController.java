@@ -1,21 +1,22 @@
 package com.optimix.api.controller;
 
-import com.optimix.config.DatabaseConfig;
-import com.optimix.model.dto.ErrorResponse;
-import com.optimix.model.dto.MessageResponse;
-import io.javalin.http.Context;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.*;
-import java.util.*;
+import com.optimix.config.DatabaseConfig;
+import com.optimix.model.dto.ErrorResponse;
+import com.optimix.model.dto.MessageResponse;
 
-/**
- * Manages query optimization history.
- *
- * GET    /api/history       → list user's last 100 history entries
- * DELETE /api/history/:id   → delete a specific history entry
- */
+import io.javalin.http.Context;
+
 public class HistoryController {
 
     private static final Logger log = LoggerFactory.getLogger(HistoryController.class);
@@ -25,8 +26,10 @@ public class HistoryController {
             Long userId = ctx.attribute("userId");
 
             try (Connection conn = DatabaseConfig.getConnection()) {
+                // FIXED: Explicitly selecting the speedup and cost columns
                 PreparedStatement ps = conn.prepareStatement("""
                     SELECT history_id, connection_id, original_query, optimized_query,
+                           original_cost, optimized_cost, speedup_factor,
                            patterns_applied, index_recommendations, created_at
                     FROM query_history
                     WHERE user_id = ?
@@ -43,9 +46,12 @@ public class HistoryController {
                     entry.put("connectionId",         rs.getObject("connection_id"));
                     entry.put("originalQuery",        rs.getString("original_query"));
                     entry.put("optimizedQuery",       rs.getString("optimized_query"));
-                    // originalCost / optimizedCost / speedupFactor omitted:
-                    // these columns are retained in the schema for backward compatibility
-                    // but were fabricated metrics (always 0 since v14-fixed).
+                    
+                    // FIXED: Restoring the missing metrics to the JSON response
+                    entry.put("originalCost",         rs.getDouble("original_cost"));
+                    entry.put("optimizedCost",        rs.getDouble("optimized_cost"));
+                    entry.put("speedupFactor",        rs.getDouble("speedup_factor"));
+                    
                     entry.put("patternsApplied",      rs.getString("patterns_applied"));
                     entry.put("indexRecommendations", rs.getString("index_recommendations"));
                     entry.put("createdAt",            rs.getString("created_at"));
