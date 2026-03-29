@@ -18,13 +18,13 @@ export default function DashboardPage() {
 
   const total = entries.length
   
-  // CRITICAL FIX: Filter out old queries that don't have a valid speedupFactor yet
+  // Safely extract valid speedups
   const validSpeedups = entries
     .map(e => Number(e.speedupFactor))
-    .filter(v => !isNaN(v) && v > 0)
+    .filter(v => !isNaN(v) && v >= 1.0)
 
-  const avgSpeedup  = validSpeedups.length > 0 ? validSpeedups.reduce((s,v) => s + v, 0) / validSpeedups.length : 0
-  const bestSpeedup = validSpeedups.length > 0 ? Math.max(...validSpeedups) : 0
+  const avgSpeedup  = validSpeedups.length > 0 ? validSpeedups.reduce((s,v) => s + v, 0) / validSpeedups.length : 1.0
+  const bestSpeedup = validSpeedups.length > 0 ? Math.max(...validSpeedups) : 1.0
   
   const firstName   = user?.fullName?.split(' ')[0] ?? 'there'
   const hour        = new Date().getHours()
@@ -44,8 +44,8 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           {[
             { label: 'Queries optimized', value: total,                        icon: '⚡', color: 'text-accent' },
-            { label: 'Average speedup',   value: validSpeedups.length > 0 ? `${avgSpeedup.toFixed(1)}×` : '—', icon: '📈', color: 'text-blue' },
-            { label: 'Best result',       value: validSpeedups.length > 0 ? `${bestSpeedup.toFixed(1)}×` : '—', icon: '🏆', color: 'text-yellow' },
+            { label: 'Average speedup',   value: validSpeedups.length > 0 ? `${avgSpeedup.toFixed(1)}×` : '1.0×', icon: '📈', color: 'text-blue' },
+            { label: 'Best result',       value: validSpeedups.length > 0 ? `${bestSpeedup.toFixed(1)}×` : '1.0×', icon: '🏆', color: 'text-yellow' },
             { label: 'Connections',       value: connections.length,           icon: '🔌', color: 'text-purple' },
           ].map(s => (
             <div key={s.label} className="bg-bg-surface border border-border rounded-xl p-4">
@@ -115,12 +115,15 @@ function HistoryRow({ entry }: { entry: HistoryEntry }) {
   const isValid = !isNaN(speedup) && speedup > 0
   const color = isValid && speedup >= 10 ? 'text-accent' : isValid && speedup >= 3 ? 'text-yellow' : 'text-text-secondary'
 
+  // Timezone Fix: Ensure 'Z' is appended if missing so the browser converts it to IST perfectly.
+  const dateStr = entry.createdAt.endsWith('Z') ? entry.createdAt : `${entry.createdAt}Z`
+
   return (
     <button onClick={() => { setInputQuery(entry.originalQuery); reset(); navigate('/optimizer') }}
       className="w-full flex items-center gap-3 p-3 bg-bg-surface border border-border rounded-xl hover:bg-bg-raised text-left transition-colors">
-      <span className={`text-sm font-mono font-bold w-12 flex-shrink-0 ${color}`}>{isValid ? speedup.toFixed(1) : '—'}×</span>
+      <span className={`text-sm font-mono font-bold w-12 flex-shrink-0 ${color}`}>{isValid ? speedup.toFixed(1) : '1.0'}×</span>
       <p className="flex-1 text-xs font-mono text-text-secondary truncate">{entry.originalQuery.replace(/\s+/g,' ').trim()}</p>
-      <span className="text-2xs text-text-disabled flex-shrink-0">{new Date(entry.createdAt).toLocaleDateString()}</span>
+      <span className="text-2xs text-text-disabled flex-shrink-0">{new Date(dateStr).toLocaleDateString()}</span>
     </button>
   )
 }
