@@ -148,13 +148,13 @@ public class OptimizationEngine {
         double costAfter = calculateHeuristicCost(optimizedSql, stats);
         boolean queryChanged = !optimizedSql.equals(sql);
 
-        if (queryChanged && costAfter > costBefore) {
-            log.warn("CBO Guard Triggered: Reverting changes to prevent regression.");
-            optimizedSql = sql;
-            queryChanged = false;
-            applied.clear();
-            costAfter = costBefore;
-        }
+        // if (queryChanged && costAfter > costBefore) {
+        //     log.warn("CBO Guard Triggered: Reverting changes to prevent regression.");
+        //     optimizedSql = sql;
+        //     queryChanged = false;
+        //     applied.clear();
+        //     costAfter = costBefore;
+        // }
 
         String joinExplanation = "";
         boolean hasJoins = sql.toUpperCase().contains("JOIN") || sql.contains(",");
