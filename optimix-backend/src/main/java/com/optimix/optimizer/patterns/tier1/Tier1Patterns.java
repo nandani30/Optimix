@@ -661,8 +661,11 @@ public class Tier1Patterns {
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            String sql = stmt.toString().toUpperCase();
-            return sql.contains("JOIN") && sql.contains("GROUP BY") && sql.contains("SUM(");
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect ps)) return false;
+            
+            return ps.getJoins() != null && ps.getJoins().size() == 1 && AstUtils.getGroupBy(ps) != null && AstUtils.hasAggregates(ps);
         }
 
         @Override
@@ -670,11 +673,55 @@ public class Tier1Patterns {
             if (!detect(stmt, stats)) return Optional.empty();
             
             try {
-                // Bulletproof rewrite for the specific demo query
-                String optimized = "SELECT s.name, t_agg.pre_agg_sum FROM schools s JOIN (SELECT school_id, SUM(salary) AS pre_agg_sum FROM teachers GROUP BY school_id) AS t_agg ON s.id = t_agg.school_id GROUP BY s.name";
-                Statement temp = CCJSqlParserUtil.parse(optimized);
+                PlainSelect ps = (PlainSelect) ((Select) stmt).getSelectBody();
+                Join join = ps.getJoins().get(0);
+                FromItem leftTable = ps.getFromItem();
+                FromItem rightTable = join.getRightItem();
                 
-                return Optional.of(buildMeta(getId(), getName(), "Aggregation after massive join", "Pre-aggregation before join", "HIGH", "Reduces input rows to join", stmt.toString(), temp.toString(), 0.85));
+                // Universally extract the ON condition
+                if (join.getOnExpression() instanceof EqualsTo) {
+                    EqualsTo eq = (EqualsTo) join.getOnExpression();
+                    
+                    String sumColStr = null;
+                    String nonSumColStr = null;
+                    
+                    // Dynamically find which column has the SUM() function
+                    for (Object itemObj : ps.getSelectItems()) {
+                        Expression expr = AstUtils.getExpression(itemObj);
+                        if (expr instanceof Function && ((Function)expr).getName().equalsIgnoreCase("SUM")) {
+                            sumColStr = expr.toString(); 
+                        } else {
+                            nonSumColStr = itemObj.toString(); 
+                        }
+                    }
+                    
+                    if (sumColStr != null && nonSumColStr != null) {
+                        // Extract the exact column name inside SUM()
+                        String rawInnerCol = sumColStr.substring(4, sumColStr.length() - 1); 
+                        if (rawInnerCol.contains(".")) rawInnerCol = rawInnerCol.split("\\.")[1];
+
+                        // Dynamically map the join columns to the correct tables
+                        String leftJoinCol = eq.getLeftExpression().toString();
+                        String rightJoinCol = eq.getRightExpression().toString();
+                        
+                        String rightAlias = AstUtils.getAliasOrName(rightTable);
+                        String innerJoinCol = leftJoinCol.startsWith(rightAlias + ".") ? leftJoinCol : rightJoinCol;
+                        String outerJoinCol = leftJoinCol.startsWith(rightAlias + ".") ? rightJoinCol : leftJoinCol;
+
+                        // Build the universal pre-aggregation subquery
+                        String innerSql = "SELECT " + innerJoinCol + ", SUM(" + rawInnerCol + ") AS pre_agg_sum FROM " + rightTable.toString() + " GROUP BY " + innerJoinCol;
+                        
+                        String newOnCond = outerJoinCol + " = " + rightAlias + "_agg." + innerJoinCol.substring(innerJoinCol.indexOf('.') + 1);
+
+                        // Assemble the final, universally optimized SQL
+                        String optimized = "SELECT " + nonSumColStr + ", SUM(" + rightAlias + "_agg.pre_agg_sum) FROM " + leftTable.toString() + 
+                                           " JOIN (" + innerSql + ") AS " + rightAlias + "_agg ON " + newOnCond + 
+                                           " GROUP BY " + nonSumColStr;
+
+                        Statement temp = CCJSqlParserUtil.parse(optimized);
+                        return Optional.of(buildMeta(getId(), getName(), "Aggregation after massive join", "Pre-aggregation before join", "HIGH", "Reduces input rows to join", stmt.toString(), temp.toString(), 0.85));
+                    }
+                }
             } catch (Exception e) {}
             
             return Optional.empty();
