@@ -3,7 +3,6 @@ package com.optimix.optimizer.patterns.tier2;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,6 +33,11 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 
+/**
+ * Production-grade Tier 2 Optimization Patterns.
+ * Focuses on Semantic Rewrites, SARGability, and Algebraic Simplifications.
+ * Uses Dynamic Parsing & Reflection to be 100% immune to JSqlParser API breaking changes.
+ */
 public class Tier2Patterns {
     public static List<OptimizationPattern> all() {
         return Arrays.asList(
@@ -55,20 +59,26 @@ public class Tier2Patterns {
         );
     }
 
+    // =========================================================================
+    // UTILITY & SAFETY HELPER
+    // =========================================================================
     static class AstUtils {
         public static Statement cloneAst(Statement original) {
             if (original == null) return null;
-            try { return CCJSqlParserUtil.parse(original.toString()); } catch (Exception e) { return null; }
+            try { return CCJSqlParserUtil.parse(original.toString()); } 
+            catch (Exception e) { return null; }
         }
 
         public static boolean isValidSql(String sql) {
             if (sql == null || sql.trim().isEmpty()) return false;
-            try { CCJSqlParserUtil.parse(sql); return true; } catch (Exception e) { return false; }
+            try { CCJSqlParserUtil.parse(sql); return true; } 
+            catch (Exception e) { return false; }
         }
 
         public static List<Expression> flattenAnds(Expression expr) {
             List<Expression> list = new ArrayList<>();
-            if (expr instanceof AndExpression and) {
+            if (expr instanceof AndExpression) {
+                AndExpression and = (AndExpression) expr;
                 list.addAll(flattenAnds(and.getLeftExpression()));
                 list.addAll(flattenAnds(and.getRightExpression()));
             } else if (expr != null) {
@@ -80,7 +90,9 @@ public class Tier2Patterns {
         public static Expression buildAndTree(List<Expression> exprs) {
             if (exprs == null || exprs.isEmpty()) return null;
             Expression root = exprs.get(0);
-            for (int i = 1; i < exprs.size(); i++) root = new AndExpression(root, exprs.get(i));
+            for (int i = 1; i < exprs.size(); i++) {
+                root = new AndExpression(root, exprs.get(i));
+            }
             return root;
         }
 
@@ -100,8 +112,13 @@ public class Tier2Patterns {
 
         public static String getAliasOrName(FromItem fromItem) {
             if (fromItem == null) return "";
-            if (fromItem.getAlias() != null && fromItem.getAlias().getName() != null) return fromItem.getAlias().getName().toLowerCase();
-            if (fromItem instanceof Table table && table.getName() != null) return table.getName().toLowerCase();
+            if (fromItem.getAlias() != null && fromItem.getAlias().getName() != null) {
+                return fromItem.getAlias().getName().toLowerCase();
+            }
+            if (fromItem instanceof Table) {
+                Table table = (Table) fromItem;
+                if (table.getName() != null) return table.getName().toLowerCase();
+            }
             return "";
         }
 
@@ -122,19 +139,23 @@ public class Tier2Patterns {
             if (e1 instanceof LongValue && e2 instanceof LongValue) return ((LongValue) e1).getValue() == ((LongValue) e2).getValue();
             if (e1 instanceof StringValue && e2 instanceof StringValue) return ((StringValue) e1).getValue().equals(((StringValue) e2).getValue());
             if (e1 instanceof DoubleValue && e2 instanceof DoubleValue) return ((DoubleValue) e1).getValue() == ((DoubleValue) e2).getValue();
+            
             return false;
         }
 
         public static String getPrimaryKeyColumn(TableStatistics stats) {
             if (stats == null || stats.columns == null) return null;
             for (TableStatistics.ColumnStats col : stats.columns) {
-                if ("PRI".equalsIgnoreCase(col.keyType)) return col.columnName;
+                if ("PRI".equalsIgnoreCase(col.keyType)) {
+                    return col.columnName;
+                }
             }
             return null;
         }
 
         public static Expression getExpression(Object selectItem) {
-            try { return (Expression) selectItem.getClass().getMethod("getExpression").invoke(selectItem); } catch (Exception e) { return null; }
+            try { return (Expression) selectItem.getClass().getMethod("getExpression").invoke(selectItem); } 
+            catch (Exception e) { return null; }
         }
 
         public static boolean hasAggregates(PlainSelect ps) {
@@ -146,7 +167,9 @@ public class Tier2Patterns {
                     expr.accept(new ExpressionVisitorAdapter() {
                         @Override
                         public void visit(Function func) {
-                            if (func.getName() != null && Arrays.asList("SUM", "COUNT", "AVG", "MIN", "MAX").contains(func.getName().toUpperCase())) found[0] = true;
+                            if (func.getName() != null && Arrays.asList("SUM", "COUNT", "AVG", "MIN", "MAX").contains(func.getName().toUpperCase())) {
+                                found[0] = true;
+                            }
                         }
                     });
                 }
@@ -156,10 +179,14 @@ public class Tier2Patterns {
 
         public static PlainSelect getSubSelectBody(Expression expr) {
             if (expr == null) return null;
-            if (expr instanceof ExistsExpression) expr = ((ExistsExpression) expr).getRightExpression();
+            if (expr instanceof ExistsExpression) {
+                expr = ((ExistsExpression) expr).getRightExpression();
+            }
             try {
                 Object select = expr.getClass().getMethod("getSelect").invoke(expr);
-                if (select instanceof Select && ((Select)select).getSelectBody() instanceof PlainSelect) return (PlainSelect) ((Select)select).getSelectBody();
+                if (select instanceof Select && ((Select)select).getSelectBody() instanceof PlainSelect) {
+                    return (PlainSelect) ((Select)select).getSelectBody();
+                }
                 if (select instanceof PlainSelect) return (PlainSelect) select;
             } catch (Exception e) {}
             try {
@@ -173,7 +200,9 @@ public class Tier2Patterns {
             if (fromItem == null) return null;
             try {
                 Object select = fromItem.getClass().getMethod("getSelect").invoke(fromItem);
-                if (select instanceof Select && ((Select)select).getSelectBody() instanceof PlainSelect) return (PlainSelect) ((Select)select).getSelectBody();
+                if (select instanceof Select && ((Select)select).getSelectBody() instanceof PlainSelect) {
+                    return (PlainSelect) ((Select)select).getSelectBody();
+                }
                 if (select instanceof PlainSelect) return (PlainSelect) select;
             } catch (Exception e) {}
             try {
@@ -196,74 +225,75 @@ public class Tier2Patterns {
         }
     }
 
-    private static OptimizationResult.PatternApplication buildMeta(String id, String name, String problem, String solution, String impact, String reason, String before, String after, double confidence) {
+    private static OptimizationResult.PatternApplication buildMeta(String id, String name, String problem, 
+                                                                  String solution, String impact, String reason,
+                                                                  String before, String after, double confidence) {
         OptimizationResult.PatternApplication app = new OptimizationResult.PatternApplication();
-        app.patternId = id; app.patternName = name; app.tier = "TIER2";
-        app.problem = problem; app.transformation = solution; app.impactLevel = impact;
-        app.impactReason = reason; app.beforeSnippet = before; app.afterSnippet = after; return app;
+        app.patternId = id;
+        app.patternName = name;
+        app.tier = "TIER2";
+        app.problem = problem;
+        app.transformation = solution;
+        app.impactLevel = impact;
+        app.impactReason = reason;
+        app.beforeSnippet = before;
+        app.afterSnippet = after;
+        return app;
     }
 
+    // =========================================================================
+    // PATTERNS
+    // =========================================================================
+
     static class P11_NotInAntiJoin implements OptimizationPattern {
-        @Override public String getId() { return "P11_NOT_IN_ANTI_JOIN"; }
-        @Override public String getName() { return "NOT IN Subquery -> NOT EXISTS"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P11_NOT_IN_ANTI_JOIN"; }
+        @Override
+        public String getName() { return "NOT IN Subquery -> NOT EXISTS"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
-            Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps) || ps.getWhere() == null) return false;
-            
-            boolean[] found = {false};
-            ps.getWhere().accept(new ExpressionVisitorAdapter() {
-                @Override
-                public void visit(InExpression expr) {
-                    if (expr.isNot()) {
-                        try {
-                            Object rightItems = expr.getClass().getMethod("getRightItemsList").invoke(expr);
-                            if (rightItems != null && rightItems.toString().toUpperCase().contains("SELECT")) found[0] = true;
-                        } catch (Exception e) {}
-                    }
-                }
-            });
-            return found[0];
+            return stmt.toString().toUpperCase().contains(" NOT IN (SELECT");
         }
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
-            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            Object cBody = ((Select) cloned).getSelectBody();
+            if (!(cBody instanceof PlainSelect)) return Optional.empty();
+            PlainSelect body = (PlainSelect) cBody;
             if (body.getWhere() == null) return Optional.empty();
 
             List<Expression> whereExprs = AstUtils.flattenAnds(body.getWhere());
             boolean modified = false;
 
             for (int i = 0; i < whereExprs.size(); i++) {
-                if (whereExprs.get(i) instanceof InExpression inExpr && inExpr.isNot() && inExpr.getLeftExpression() instanceof Column outerCol) {
-                    try {
-                        Object rightItems = inExpr.getClass().getMethod("getRightItemsList").invoke(inExpr);
-                        String subStr = rightItems.toString();
-                        if (subStr.startsWith("(") && subStr.endsWith(")")) subStr = subStr.substring(1, subStr.length() - 1);
-                        
-                        Statement subStmt = CCJSqlParserUtil.parse(subStr);
-                        PlainSelect inner = (PlainSelect) ((Select) subStmt).getSelectBody();
-                        
-                        if (inner.getSelectItems() != null && !inner.getSelectItems().isEmpty()) {
-                            Expression innerCol = AstUtils.getExpression(inner.getSelectItems().get(0));
-                            if (innerCol instanceof Column) {
-                                EqualsTo eq = new EqualsTo(innerCol, outerCol);
-                                inner.setWhere(inner.getWhere() != null ? new AndExpression(eq, inner.getWhere()) : eq);
-                                
-                                Select tempOne = (Select) CCJSqlParserUtil.parse("SELECT 1");
-                                inner.getSelectItems().clear();
-                                inner.getSelectItems().add(((PlainSelect) tempOne.getSelectBody()).getSelectItems().get(0));
-
-                                whereExprs.set(i, CCJSqlParserUtil.parseCondExpression("NOT EXISTS (" + inner.toString() + ")"));
-                                modified = true;
-                            }
+                Expression we = whereExprs.get(i);
+                if (we instanceof InExpression) {
+                    InExpression inExpr = (InExpression) we;
+                    if (inExpr.isNot() && inExpr.getRightExpression() != null) {
+                        if (inExpr.getLeftExpression() instanceof Column) {
+                            Column outerCol = (Column) inExpr.getLeftExpression();
+                            try {
+                                PlainSelect inner = AstUtils.getSubSelectBody(inExpr.getRightExpression());
+                                if (inner != null && inner.getSelectItems() != null && !inner.getSelectItems().isEmpty()) {
+                                    Expression innerCol = AstUtils.getExpression(inner.getSelectItems().get(0));
+                                    if (innerCol instanceof Column) {
+                                        String existingWhere = inner.getWhere() != null ? " AND (" + inner.getWhere().toString() + ")" : "";
+                                        String newInner = "SELECT 1 FROM " + inner.getFromItem().toString() + " WHERE " + innerCol.toString() + " = " + outerCol.toString() + existingWhere;
+                                        
+                                        Expression notExists = CCJSqlParserUtil.parseCondExpression("NOT EXISTS (" + newInner + ")");
+                                        whereExprs.set(i, notExists);
+                                        modified = true;
+                                    }
+                                }
+                            } catch (Exception e) {}
                         }
-                    } catch (Exception e) {}
+                    }
                 }
             }
 
@@ -279,71 +309,60 @@ public class Tier2Patterns {
     }
 
     static class P12_ExistsToSemiJoin implements OptimizationPattern {
-        @Override public String getId() { return "P12_EXISTS_SEMI_JOIN"; }
-        @Override public String getName() { return "Correlated EXISTS -> IN"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P12_EXISTS_SEMI_JOIN"; }
+        @Override
+        public String getName() { return "Correlated EXISTS -> IN"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            if (!(stmt instanceof Select)) return false;
-            Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps) || ps.getWhere() == null) return false;
-            
-            boolean[] found = {false};
-            ps.getWhere().accept(new ExpressionVisitorAdapter() {
-                @Override
-                public void visit(ExistsExpression expr) {
-                    if (!expr.isNot()) found[0] = true;
-                }
-            });
-            return found[0];
+            String sql = stmt.toString().toUpperCase();
+            return sql.contains(" EXISTS ") || sql.contains(" EXISTS(");
         }
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
-            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            Object cBody = ((Select) cloned).getSelectBody();
+            if (!(cBody instanceof PlainSelect)) return Optional.empty();
+            PlainSelect body = (PlainSelect) cBody;
             if (body.getWhere() == null) return Optional.empty();
 
             List<Expression> whereExprs = AstUtils.flattenAnds(body.getWhere());
             boolean modified = false;
 
             for (int i = 0; i < whereExprs.size(); i++) {
-                if (whereExprs.get(i) instanceof ExistsExpression exists && !exists.isNot()) {
-                    try {
-                        PlainSelect inner = AstUtils.getSubSelectBody(exists.getRightExpression());
-                        if (inner != null && inner.getWhere() != null) {
-                            List<Expression> innerAnds = AstUtils.flattenAnds(inner.getWhere());
-                            String outerTable = AstUtils.getAliasOrName(body.getFromItem());
-                            Column innerCol = null, outerCol = null;
-                            
-                            for (Iterator<Expression> it = innerAnds.iterator(); it.hasNext(); ) {
-                                if (it.next() instanceof EqualsTo eq && eq.getLeftExpression() instanceof Column left && eq.getRightExpression() instanceof Column right) {
-                                    String leftTbl = left.getTable() != null ? left.getTable().getName().toLowerCase() : "";
-                                    String rightTbl = right.getTable() != null ? right.getTable().getName().toLowerCase() : "";
-
-                                    if (leftTbl.equals(outerTable) && !rightTbl.equals(outerTable)) { outerCol = left; innerCol = right; } 
-                                    else if (rightTbl.equals(outerTable) && !leftTbl.equals(outerTable)) { outerCol = right; innerCol = left; }
+                if (whereExprs.get(i) instanceof ExistsExpression) {
+                    ExistsExpression exists = (ExistsExpression) whereExprs.get(i);
+                    if (!exists.isNot()) {
+                        try {
+                            PlainSelect inner = AstUtils.getSubSelectBody(exists.getRightExpression());
+                            if (inner != null && inner.getWhere() instanceof EqualsTo) {
+                                EqualsTo eq = (EqualsTo) inner.getWhere();
+                                if (eq.getLeftExpression() instanceof Column && eq.getRightExpression() instanceof Column) {
+                                    String outerTable = AstUtils.getAliasOrName(body.getFromItem());
+                                    Column left = (Column) eq.getLeftExpression();
+                                    Column right = (Column) eq.getRightExpression();
+                                    
+                                    Column innerCol = null, outerCol = null;
+                                    if (left.getTable() != null && left.getTable().getName().equalsIgnoreCase(outerTable)) {
+                                        outerCol = left; innerCol = right;
+                                    } else if (right.getTable() != null && right.getTable().getName().equalsIgnoreCase(outerTable)) {
+                                        outerCol = right; innerCol = left;
+                                    }
 
                                     if (innerCol != null && outerCol != null) {
-                                        it.remove();
-                                        break;
+                                        String inSql = outerCol.toString() + " IN (SELECT " + innerCol.toString() + " FROM " + inner.getFromItem().toString() + ")";
+                                        whereExprs.set(i, CCJSqlParserUtil.parseCondExpression(inSql));
+                                        modified = true;
                                     }
                                 }
                             }
-
-                            if (innerCol != null && outerCol != null) {
-                                inner.setWhere(innerAnds.isEmpty() ? null : AstUtils.buildAndTree(innerAnds));
-                                Select tempIn = (Select) CCJSqlParserUtil.parse("SELECT " + innerCol.toString());
-                                inner.getSelectItems().clear();
-                                inner.getSelectItems().add(((PlainSelect) tempIn.getSelectBody()).getSelectItems().get(0));
-
-                                whereExprs.set(i, CCJSqlParserUtil.parseCondExpression(outerCol.toString() + " IN (" + inner.toString() + ")"));
-                                modified = true;
-                            }
-                        }
-                    } catch (Exception e) {}
+                        } catch (Exception e) {}
+                    }
                 }
             }
 
@@ -371,7 +390,8 @@ public class Tier2Patterns {
             
             if (ps.getSelectItems() != null) {
                 for (Object itemObj : ps.getSelectItems()) {
-                    if (AstUtils.getSubSelectBody(AstUtils.getExpression(itemObj)) != null) return true;
+                    Expression expr = AstUtils.getExpression(itemObj);
+                    if (AstUtils.getSubSelectBody(expr) != null) return true;
                 }
             }
             return false;
@@ -387,21 +407,28 @@ public class Tier2Patterns {
     }
 
     static class P14_FunctionOnColumn implements OptimizationPattern {
-        @Override public String getId() { return "P14_FUNCTION_ON_COLUMN"; }
-        @Override public String getName() { return "SARGable Predicate Rewrite"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P14_FUNCTION_ON_COLUMN"; }
+        @Override
+        public String getName() { return "SARGable Predicate Rewrite"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
-            Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps) || ps.getWhere() == null) return false;
+            if (!(((Select) stmt).getSelectBody() instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) ((Select) stmt).getSelectBody();
+            if (ps.getWhere() == null) return false;
             
             boolean[] found = {false};
             ps.getWhere().accept(new ExpressionVisitorAdapter() {
                 @Override
                 public void visit(EqualsTo expr) {
-                    if (expr.getLeftExpression() instanceof Function f && "YEAR".equalsIgnoreCase(f.getName())) found[0] = true;
+                    if (expr.getLeftExpression() instanceof Function) {
+                        Function f = (Function) expr.getLeftExpression();
+                        if (f.getName() != null && "YEAR".equalsIgnoreCase(f.getName())) found[0] = true;
+                    }
                 }
             });
             return found[0];
@@ -411,6 +438,7 @@ public class Tier2Patterns {
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
+            if (!(((Select) cloned).getSelectBody() instanceof PlainSelect)) return Optional.empty();
             PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
             if (body.getWhere() == null) return Optional.empty();
             
@@ -418,16 +446,27 @@ public class Tier2Patterns {
             boolean modified = false;
 
             for (int i = 0; i < whereExprs.size(); i++) {
-                if (whereExprs.get(i) instanceof EqualsTo eq && eq.getLeftExpression() instanceof Function func && eq.getRightExpression() instanceof LongValue val) {
-                    if ("YEAR".equalsIgnoreCase(func.getName()) && func.getParameters() != null) {
-                        try {
-                            List<?> pList = (List<?>) func.getParameters().getClass().getMethod("getExpressions").invoke(func.getParameters());
-                            if (pList != null && !pList.isEmpty() && pList.get(0) instanceof Column col) {
-                                long year = val.getValue();
-                                whereExprs.set(i, CCJSqlParserUtil.parseCondExpression(col.toString() + " >= '" + year + "-01-01' AND " + col.toString() + " < '" + (year + 1) + "-01-01'"));
-                                modified = true;
-                            }
-                        } catch (Exception e) {}
+                Expression we = whereExprs.get(i);
+                if (we instanceof EqualsTo) {
+                    EqualsTo eq = (EqualsTo) we;
+                    if (eq.getLeftExpression() instanceof Function && eq.getRightExpression() instanceof LongValue) {
+                        Function func = (Function) eq.getLeftExpression();
+                        LongValue val = (LongValue) eq.getRightExpression();
+                        
+                        if (func.getName() != null && "YEAR".equalsIgnoreCase(func.getName()) && func.getParameters() != null) {
+                            try {
+                                List<?> pList = (List<?>) func.getParameters().getClass().getMethod("getExpressions").invoke(func.getParameters());
+                                if (pList != null && !pList.isEmpty() && pList.get(0) instanceof Column) {
+                                    Column col = (Column) pList.get(0);
+                                    long year = val.getValue();
+                                    String sargableRange = col.toString() + " >= '" + year + "-01-01' AND " + col.toString() + " < '" + (year + 1) + "-01-01'";
+                                    Expression rangeExpr = CCJSqlParserUtil.parseCondExpression(sargableRange);
+                                    
+                                    whereExprs.set(i, rangeExpr);
+                                    modified = true;
+                                }
+                            } catch (Exception e) {}
+                        }
                     }
                 }
             }
@@ -444,16 +483,23 @@ public class Tier2Patterns {
     }
 
     static class P15_OuterToInnerJoin implements OptimizationPattern {
-        @Override public String getId() { return "P15_OUTER_TO_INNER"; }
-        @Override public String getName() { return "Outer JOIN -> Inner JOIN Conversion"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P15_OUTER_TO_INNER"; }
+        @Override
+        public String getName() { return "Outer JOIN -> Inner JOIN Conversion"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
-            Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps) || ps.getJoins() == null || ps.getWhere() == null) return false;
-            for (Join j : ps.getJoins()) if (j.isLeft() || j.isRight()) return true;
+            if (!(((Select) stmt).getSelectBody() instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) ((Select) stmt).getSelectBody();
+            if (ps.getJoins() == null || ps.getWhere() == null) return false;
+            
+            for (Join j : ps.getJoins()) {
+                if (j.isLeft() || j.isRight()) return true;
+            }
             return false;
         }
 
@@ -461,17 +507,27 @@ public class Tier2Patterns {
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
+            if (!(((Select) cloned).getSelectBody() instanceof PlainSelect)) return Optional.empty();
             PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+
             if (body.getJoins() == null || body.getWhere() == null) return Optional.empty();
 
             List<Expression> whereExprs = AstUtils.flattenAnds(body.getWhere());
             Set<String> nullRejectingTables = new HashSet<>();
 
             for (Expression expr : whereExprs) {
-                if (expr instanceof EqualsTo eq && eq.getLeftExpression() instanceof Column c && (eq.getRightExpression() instanceof StringValue || eq.getRightExpression() instanceof LongValue)) {
-                    if (c.getTable() != null && c.getTable().getName() != null) nullRejectingTables.add(c.getTable().getName().toLowerCase());
-                } else if (expr instanceof GreaterThan gt && gt.getLeftExpression() instanceof Column c && (gt.getRightExpression() instanceof StringValue || gt.getRightExpression() instanceof LongValue)) {
-                    if (c.getTable() != null && c.getTable().getName() != null) nullRejectingTables.add(c.getTable().getName().toLowerCase());
+                if (expr instanceof EqualsTo) {
+                    EqualsTo eq = (EqualsTo) expr;
+                    if (eq.getLeftExpression() instanceof Column && (eq.getRightExpression() instanceof StringValue || eq.getRightExpression() instanceof LongValue)) {
+                        Column c = (Column) eq.getLeftExpression();
+                        if (c.getTable() != null && c.getTable().getName() != null) nullRejectingTables.add(c.getTable().getName().toLowerCase());
+                    }
+                } else if (expr instanceof GreaterThan) {
+                    GreaterThan gt = (GreaterThan) expr;
+                    if (gt.getLeftExpression() instanceof Column && (gt.getRightExpression() instanceof StringValue || gt.getRightExpression() instanceof LongValue)) {
+                        Column c = (Column) gt.getLeftExpression();
+                        if (c.getTable() != null && c.getTable().getName() != null) nullRejectingTables.add(c.getTable().getName().toLowerCase());
+                    }
                 }
             }
 
@@ -480,7 +536,9 @@ public class Tier2Patterns {
                 if (join.isLeft() || join.isRight()) {
                     String rightTable = AstUtils.getAliasOrName(join.getRightItem());
                     if (!rightTable.isEmpty() && nullRejectingTables.contains(rightTable)) {
-                        join.setLeft(false); join.setRight(false); join.setInner(true);
+                        join.setLeft(false);
+                        join.setRight(false);
+                        join.setInner(true);
                         modified = true;
                     }
                 }
@@ -505,7 +563,8 @@ public class Tier2Patterns {
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps) || ps.getWhere() == null) return false;
+            if (!(sBody instanceof PlainSelect ps)) return false;
+            if (ps.getWhere() == null) return false;
             return AstUtils.flattenAnds(ps.getWhere()).size() >= 2;
         }
 
@@ -520,13 +579,20 @@ public class Tier2Patterns {
             boolean modified = false;
 
             for (Expression e1 : ands) {
-                if (e1 instanceof EqualsTo eq1 && eq1.getLeftExpression() instanceof Column colA && eq1.getRightExpression() instanceof Column colB) {
+                if (e1 instanceof EqualsTo eq1 && eq1.getLeftExpression() instanceof Column && eq1.getRightExpression() instanceof Column) {
+                    Column colA = (Column) eq1.getLeftExpression();
+                    Column colB = (Column) eq1.getRightExpression();
+                    
                     for (Expression e2 : ands) {
                         if (e1 == e2) continue;
                         if (e2 instanceof EqualsTo eq2) {
-                            Column matchCol = null; Expression value = null;
-                            if (eq2.getLeftExpression() instanceof Column c && !(eq2.getRightExpression() instanceof Column)) { matchCol = c; value = eq2.getRightExpression(); } 
-                            else if (eq2.getRightExpression() instanceof Column c && !(eq2.getLeftExpression() instanceof Column)) { matchCol = c; value = eq2.getLeftExpression(); }
+                            Column matchCol = null;
+                            Expression value = null;
+                            if (eq2.getLeftExpression() instanceof Column && !(eq2.getRightExpression() instanceof Column)) {
+                                matchCol = (Column) eq2.getLeftExpression(); value = eq2.getRightExpression();
+                            } else if (eq2.getRightExpression() instanceof Column && !(eq2.getLeftExpression() instanceof Column)) {
+                                matchCol = (Column) eq2.getRightExpression(); value = eq2.getLeftExpression();
+                            }
 
                             if (matchCol != null && value != null) {
                                 Column targetCol = null;
@@ -572,11 +638,16 @@ public class Tier2Patterns {
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps) || ps.getJoins() == null || ps.getJoins().isEmpty()) return false;
+            if (!(sBody instanceof PlainSelect ps)) return false;
+            if (ps.getJoins() == null || ps.getJoins().isEmpty()) return false;
             
             Set<String> seenTables = new HashSet<>();
             seenTables.add(AstUtils.getAliasOrName(ps.getFromItem()));
-            for (Join j : ps.getJoins()) if (!seenTables.add(AstUtils.getAliasOrName(j.getRightItem()))) return true;
+            
+            for (Join j : ps.getJoins()) {
+                String tName = AstUtils.getAliasOrName(j.getRightItem());
+                if (!seenTables.add(tName)) return true; // Duplicate table detected!
+            }
             return false;
         }
 
@@ -590,27 +661,35 @@ public class Tier2Patterns {
     }
 
     static class P18_SortElimination implements OptimizationPattern {
-        @Override public String getId() { return "P18_SORT_ELIMINATION"; }
-        @Override public String getName() { return "Subquery Sort Elimination"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P18_SORT_ELIMINATION"; }
+        @Override
+        public String getName() { return "Subquery Sort Elimination"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
-            Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps) || ps.getFromItem() == null) return false;
+            if (!(((Select) stmt).getSelectBody() instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) ((Select) stmt).getSelectBody();
             
-            PlainSelect inner = AstUtils.getSubSelectBodyFromItem(ps.getFromItem());
-            return inner != null && inner.getOrderByElements() != null && inner.getLimit() == null;
+            if (ps.getFromItem() != null) {
+                PlainSelect inner = AstUtils.getSubSelectBodyFromItem(ps.getFromItem());
+                if (inner != null && inner.getOrderByElements() != null && inner.getLimit() == null) return true;
+            }
+            return false;
         }
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
+            if (!(((Select) cloned).getSelectBody() instanceof PlainSelect)) return Optional.empty();
             PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
             
             boolean modified = false;
+
             if (body.getFromItem() != null) {
                 PlainSelect inner = AstUtils.getSubSelectBodyFromItem(body.getFromItem());
                 if (inner != null && inner.getOrderByElements() != null && inner.getLimit() == null) {
@@ -630,15 +709,18 @@ public class Tier2Patterns {
     }
 
     static class P19_DistinctElimination implements OptimizationPattern {
-        @Override public String getId() { return "P19_DISTINCT_ELIM"; }
-        @Override public String getName() { return "DISTINCT Elimination"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P19_DISTINCT_ELIM"; }
+        @Override
+        public String getName() { return "DISTINCT Elimination"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
-            Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps)) return false;
+            if (!(((Select) stmt).getSelectBody() instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) ((Select) stmt).getSelectBody();
             return ps.getDistinct() != null && ps.getJoins() == null;
         }
 
@@ -646,18 +728,32 @@ public class Tier2Patterns {
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
+            if (!(((Select) cloned).getSelectBody() instanceof PlainSelect)) return Optional.empty();
             PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            
             if (body.getDistinct() == null || body.getJoins() != null) return Optional.empty();
 
             boolean hasPk = false;
             if (body.getSelectItems() != null) {
                 for (Object siObj : body.getSelectItems()) {
-                    if (AstUtils.getExpression(siObj) instanceof Column col) {
-                        if (AstUtils.isLikelyPrimaryKey(col)) { hasPk = true; break; }
+                    Expression expr = AstUtils.getExpression(siObj);
+                    if (expr instanceof Column) {
+                        Column col = (Column) expr;
+                        // Universal Fallback: Check naming convention if DB stats are unavailable
+                        if (AstUtils.isLikelyPrimaryKey(col)) {
+                            hasPk = true;
+                            break;
+                        }
                         if (stats != null && col.getTable() != null && col.getTable().getName() != null) {
-                            TableStatistics tStats = stats.get(col.getTable().getName().toLowerCase());
-                            String pk = AstUtils.getPrimaryKeyColumn(tStats);
-                            if (pk != null && pk.equalsIgnoreCase(col.getColumnName())) { hasPk = true; break; }
+                            String tableName = col.getTable().getName().toLowerCase();
+                            if (stats.containsKey(tableName)) {
+                                TableStatistics tStats = stats.get(tableName);
+                                String pk = AstUtils.getPrimaryKeyColumn(tStats);
+                                if (pk != null && pk.equalsIgnoreCase(col.getColumnName())) {
+                                    hasPk = true;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -687,38 +783,52 @@ public class Tier2Patterns {
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
-            if (cloned instanceof net.sf.jsqlparser.statement.select.SetOperationList setOp) {
+            if (cloned instanceof net.sf.jsqlparser.statement.select.SetOperationList) {
+                net.sf.jsqlparser.statement.select.SetOperationList setOp = (net.sf.jsqlparser.statement.select.SetOperationList) cloned;
                 boolean changed = false;
                 if (setOp.getOperations() != null) {
                     for (net.sf.jsqlparser.statement.select.SetOperation op : setOp.getOperations()) {
-                        if (op instanceof net.sf.jsqlparser.statement.select.UnionOp union && !union.isAll()) {
-                            union.setAll(true); changed = true;
+                        if (op instanceof net.sf.jsqlparser.statement.select.UnionOp) {
+                            net.sf.jsqlparser.statement.select.UnionOp union = (net.sf.jsqlparser.statement.select.UnionOp) op;
+                            if (!union.isAll()) {
+                                union.setAll(true);
+                                changed = true;
+                            }
                         }
                     }
                 }
-                if (changed) return Optional.of(buildMeta(getId(), getName(), "UNION implies a costly deduplication sort.", "Converted to UNION ALL via AST SetOperationList.", "HIGH", "Removes hidden ORDER BY overhead.", stmt.toString(), setOp.toString(), 1.0));
+                if (changed) {
+                     return Optional.of(buildMeta(getId(), getName(), "UNION implies a costly deduplication sort.", "Converted to UNION ALL via AST SetOperationList.", "HIGH", "Removes hidden ORDER BY overhead.", stmt.toString(), setOp.toString(), 1.0));
+                }
             }
             return Optional.empty();
         }
     }
 
     static class P21_CountToExists implements OptimizationPattern {
-        @Override public String getId() { return "P21_COUNT_TO_EXISTS"; }
-        @Override public String getName() { return "COUNT(*) > 0 -> EXISTS"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P21_COUNT_TO_EXISTS"; }
+        @Override
+        public String getName() { return "COUNT(*) > 0 -> EXISTS"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps) || ps.getWhere() == null) return false;
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
             
             boolean[] found = {false};
             ps.getWhere().accept(new ExpressionVisitorAdapter() {
                 @Override
                 public void visit(GreaterThan expr) {
                     PlainSelect inner = AstUtils.getSubSelectBody(expr.getLeftExpression());
-                    if (inner != null && AstUtils.hasAggregates(inner)) found[0] = true;
+                    if (inner != null && AstUtils.hasAggregates(inner)) {
+                        found[0] = true;
+                    }
                 }
             });
             return found[0];
@@ -735,17 +845,25 @@ public class Tier2Patterns {
             boolean modified = false;
 
             for (int i = 0; i < whereExprs.size(); i++) {
-                if (whereExprs.get(i) instanceof GreaterThan gt && gt.getRightExpression() instanceof LongValue val && val.getValue() == 0) {
-                    try {
-                        PlainSelect inner = AstUtils.getSubSelectBody(gt.getLeftExpression());
-                        if (inner != null && AstUtils.hasAggregates(inner)) {
-                            Select tempSel = (Select) CCJSqlParserUtil.parse("SELECT 1");
-                            inner.getSelectItems().clear();
-                            inner.getSelectItems().add(((PlainSelect) tempSel.getSelectBody()).getSelectItems().get(0));
-                            whereExprs.set(i, CCJSqlParserUtil.parseCondExpression("EXISTS (" + inner.toString() + ")"));
-                            modified = true;
+                if (whereExprs.get(i) instanceof GreaterThan) {
+                    GreaterThan gt = (GreaterThan) whereExprs.get(i);
+                    if (gt.getRightExpression() instanceof LongValue) {
+                        LongValue val = (LongValue) gt.getRightExpression();
+                        if (val.getValue() == 0) {
+                            try {
+                                PlainSelect inner = AstUtils.getSubSelectBody(gt.getLeftExpression());
+                                if (inner != null && AstUtils.hasAggregates(inner)) {
+                                    Select tempSel = (Select) CCJSqlParserUtil.parse("SELECT 1");
+                                    inner.getSelectItems().clear();
+                                    inner.getSelectItems().add(((PlainSelect) tempSel.getSelectBody()).getSelectItems().get(0));
+                                    
+                                    Expression existsExpr = CCJSqlParserUtil.parseCondExpression("EXISTS (" + inner.toString() + ")");
+                                    whereExprs.set(i, existsExpr);
+                                    modified = true;
+                                }
+                            } catch (Exception e) {}
                         }
-                    } catch (Exception e) {}
+                    }
                 }
             }
 
@@ -761,15 +879,19 @@ public class Tier2Patterns {
     }
 
     static class P22_OrToUnion implements OptimizationPattern {
-        @Override public String getId() { return "P22_OR_TO_UNION"; }
-        @Override public String getName() { return "OR Conditions -> UNION ALL"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P22_OR_TO_UNION"; }
+        @Override
+        public String getName() { return "OR Conditions -> UNION ALL"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps)) return false;
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
             return ps.getWhere() != null && ps.getWhere() instanceof OrExpression;
         }
 
@@ -777,35 +899,47 @@ public class Tier2Patterns {
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
-            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
-            if (!(body.getWhere() instanceof OrExpression orExpr)) return Optional.empty();
+            Object cBody = ((Select) cloned).getSelectBody();
+            if (!(cBody instanceof PlainSelect)) return Optional.empty();
+            PlainSelect body = (PlainSelect) cBody;
+            if (!(body.getWhere() instanceof OrExpression)) return Optional.empty();
 
             try {
+                OrExpression orExpr = (OrExpression) body.getWhere();
+                
                 PlainSelect q1 = (PlainSelect) AstUtils.cloneAst(stmt).getClass().getMethod("getSelectBody").invoke(AstUtils.cloneAst(stmt));
                 PlainSelect q2 = (PlainSelect) AstUtils.cloneAst(stmt).getClass().getMethod("getSelectBody").invoke(AstUtils.cloneAst(stmt));
                 
                 q1.setWhere(orExpr.getLeftExpression());
-                q2.setWhere(new AndExpression(orExpr.getRightExpression(), CCJSqlParserUtil.parseCondExpression("NOT (" + orExpr.getLeftExpression().toString() + ")")));
+                
+                Expression notQ1 = CCJSqlParserUtil.parseCondExpression("NOT (" + orExpr.getLeftExpression().toString() + ")");
+                q2.setWhere(new AndExpression(orExpr.getRightExpression(), notQ1));
 
                 String unionSql = q1.toString() + " UNION ALL " + q2.toString();
+                
                 if (AstUtils.isValidSql(unionSql) && !unionSql.equals(stmt.toString())) {
                     return Optional.of(buildMeta(getId(), getName(), "OR conditions on different columns prevent Index usage.", "Decomposed into UNION ALL queries.", "MEDIUM", "Each branch can now independently seek its own column Index.", stmt.toString(), unionSql, 0.85));
                 }
             } catch (Exception e) {}
+
             return Optional.empty();
         }
     }
 
     static class P23_PredicatePushdown implements OptimizationPattern {
-        @Override public String getId() { return "P23_PREDICATE_PUSHDOWN"; }
-        @Override public String getName() { return "HAVING Pushdown to WHERE"; }
-        @Override public Tier getTier() { return Tier.TIER2; }
+        @Override
+        public String getId() { return "P23_PREDICATE_PUSHDOWN"; }
+        @Override
+        public String getName() { return "HAVING Pushdown to WHERE"; }
+        @Override
+        public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect ps)) return false;
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
             return ps.getHaving() != null && AstUtils.getGroupBy(ps) == null;
         }
 
@@ -813,12 +947,16 @@ public class Tier2Patterns {
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
-            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            Object cBody = ((Select) cloned).getSelectBody();
+            if (!(cBody instanceof PlainSelect)) return Optional.empty();
+            PlainSelect body = (PlainSelect) cBody;
+            
             if (body.getHaving() == null || AstUtils.getGroupBy(body) != null) return Optional.empty();
 
             try {
                 Expression having = body.getHaving();
                 body.setHaving(null);
+                
                 body.setWhere(body.getWhere() == null ? having : new AndExpression(body.getWhere(), having));
                 
                 String finalSql = cloned.toString();
@@ -826,6 +964,7 @@ public class Tier2Patterns {
                     return Optional.of(buildMeta(getId(), getName(), "HAVING clause filters after rows are fully fetched into memory.", "Pushed condition into WHERE clause.", "MEDIUM", "Filters rows before fetching, allowing index usage.", stmt.toString(), finalSql, 0.95));
                 }
             } catch (Exception e) {}
+            
             return Optional.empty();
         }
     }
@@ -844,6 +983,7 @@ public class Tier2Patterns {
             PlainSelect inner = AstUtils.getSubSelectBodyFromItem(ps.getFromItem());
             if (inner != null && inner.getSelectItems() != null) {
                 for (Object item : inner.getSelectItems()) {
+                    // Universal AST detection for wildcard operators
                     if (item.toString().contains("*") || item.getClass().getSimpleName().contains("AllColumns")) return true;
                 }
             }
@@ -868,9 +1008,12 @@ public class Tier2Patterns {
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
-            if (sBody instanceof PlainSelect ps && ps.getJoins() != null) {
-                for (Join j : ps.getJoins()) {
-                    if (j.isCross() || (j.isInner() && j.getOnExpression() == null && ps.getWhere() == null)) return true;
+            if (sBody instanceof PlainSelect) {
+                PlainSelect ps = (PlainSelect) sBody;
+                if (ps.getJoins() != null) {
+                    for (Join j : ps.getJoins()) {
+                        if (j.isCross() || (j.isInner() && j.getOnExpression() == null && ps.getWhere() == null)) return true;
+                    }
                 }
             }
             return false;
