@@ -169,22 +169,127 @@ public class Tier3Patterns {
         @Override public String getId() { return "P26_SELECT_STAR"; }
         @Override public String getName() { return "SELECT * Projection Warning"; }
         @Override public Tier getTier() { return Tier.TIER3; }
-        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return stmt.toString().toUpperCase().contains("SELECT *"); }
-        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (sBody instanceof PlainSelect) {
+                PlainSelect ps = (PlainSelect) sBody;
+                if (ps.getSelectItems() != null) {
+                    for (Object item : ps.getSelectItems()) {
+                        if (item.getClass().getSimpleName().contains("AllColumns")) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            if (detect(stmt, stats)) {
+                return Optional.of(buildMeta(getId(), getName(), "SELECT * fetches unnecessary columns, wasting memory.", "Identified SELECT * via AST AllColumns detection.", "LOW", "Reduces network I/O and memory allocation.", stmt.toString(), stmt.toString(), 1.0));
+            }
+            return Optional.empty();
+        }
     }
     static class P28_ExpressionSimplification implements OptimizationPattern {
         @Override public String getId() { return "P28_EXPR_SIMPLIFICATION"; }
         @Override public String getName() { return "Expression Simplification"; }
         @Override public Tier getTier() { return Tier.TIER3; }
-        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
-        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
+
+            boolean[] found = {false};
+            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
+                @Override
+                public void visit(net.sf.jsqlparser.expression.operators.arithmetic.Addition expr) {
+                    if (expr.getRightExpression() instanceof net.sf.jsqlparser.expression.LongValue) {
+                        if (((net.sf.jsqlparser.expression.LongValue) expr.getRightExpression()).getValue() == 0) found[0] = true;
+                    }
+                }
+                @Override
+                public void visit(net.sf.jsqlparser.expression.operators.arithmetic.Multiplication expr) {
+                    if (expr.getRightExpression() instanceof net.sf.jsqlparser.expression.LongValue) {
+                        if (((net.sf.jsqlparser.expression.LongValue) expr.getRightExpression()).getValue() == 1) found[0] = true;
+                    }
+                }
+            });
+            return found[0];
+        }
+
+        @Override
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            if (detect(stmt, stats)) {
+                 return Optional.of(buildMeta(getId(), getName(), "Useless algebraic operations (+0, *1) slow down execution.", "Removed mathematically neutral operations.", "LOW", "Reduces CPU cycles.", stmt.toString(), stmt.toString().replaceAll("\\+\\s*0\\b", "").replaceAll("\\*\\s*1\\b", ""), 1.0));
+            }
+            return Optional.empty();
+        }
     }
     static class P30_AlgebraicIdentity implements OptimizationPattern {
         @Override public String getId() { return "P30_ALGEBRAIC_IDENTITY"; }
         @Override public String getName() { return "Algebraic Identity"; }
         @Override public Tier getTier() { return Tier.TIER3; }
-        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
-        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
+
+            boolean[] found = {false};
+            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
+                @Override
+                public void visit(EqualsTo expr) {
+                    if (expr.getLeftExpression() != null && expr.getRightExpression() != null) {
+                        if (expr.getLeftExpression().toString().equalsIgnoreCase(expr.getRightExpression().toString())) {
+                            found[0] = true;
+                        }
+                    }
+                }
+            });
+            return found[0];
+        }
+
+        @Override
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            if (body.getWhere() == null) return Optional.empty();
+
+            List<Expression> ands = AstUtils.flattenAnds(body.getWhere());
+            boolean modified = false;
+
+            for (int i = 0; i < ands.size(); i++) {
+                if (ands.get(i) instanceof EqualsTo) {
+                    EqualsTo eq = (EqualsTo) ands.get(i);
+                    if (eq.getLeftExpression().toString().equalsIgnoreCase(eq.getRightExpression().toString())) {
+                        try {
+                            ands.set(i, CCJSqlParserUtil.parseCondExpression("1 = 1"));
+                            modified = true;
+                        } catch (Exception e) {}
+                    }
+                }
+            }
+
+            if (modified) {
+                body.setWhere(AstUtils.buildAndTree(ands));
+                String finalSql = cloned.toString();
+                if (!finalSql.equals(stmt.toString())) {
+                    return Optional.of(buildMeta(getId(), getName(), "Self-equality checks (A=A) are redundant.", "Reduced to constant true (1=1).", "LOW", "Prevents useless column comparisons.", stmt.toString(), finalSql, 1.0));
+                }
+            }
+            return Optional.empty();
+        }
     }
     static class P31_InListFlatten implements OptimizationPattern {
         @Override public String getId() { return "P31_IN_LIST_FLATTEN"; }
@@ -211,8 +316,35 @@ public class Tier3Patterns {
         @Override public String getId() { return "P39_SARGABILITY"; }
         @Override public String getName() { return "SARGability"; }
         @Override public Tier getTier() { return Tier.TIER3; }
-        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
-        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select)) return false;
+            Object sBody = ((Select) stmt).getSelectBody();
+            if (!(sBody instanceof PlainSelect)) return false;
+            PlainSelect ps = (PlainSelect) sBody;
+            if (ps.getWhere() == null) return false;
+
+            boolean[] found = {false};
+            ps.getWhere().accept(new net.sf.jsqlparser.expression.ExpressionVisitorAdapter() {
+                @Override
+                public void visit(net.sf.jsqlparser.expression.operators.relational.LikeExpression expr) {
+                    if (expr.getRightExpression() instanceof net.sf.jsqlparser.expression.StringValue) {
+                        String val = ((net.sf.jsqlparser.expression.StringValue) expr.getRightExpression()).getValue();
+                        if (val.startsWith("%") && !val.equals("%")) found[0] = true;
+                    }
+                }
+            });
+            return found[0];
+        }
+
+        @Override
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            if (detect(stmt, stats)) {
+                return Optional.of(buildMeta(getId(), getName(), "Leading wildcards (%abc) disable B-Tree indexes.", "Reversed wildcard to enable range scans.", "HIGH", "Restores Index Seek capabilities.", stmt.toString(), stmt.toString().replaceAll("(?i)(LIKE\\s+')%([^']+)'", "$1$2%'"), 1.0));
+            }
+            return Optional.empty();
+        }
     }
 
 
