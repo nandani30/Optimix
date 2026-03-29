@@ -58,7 +58,7 @@ export default function ResultsPanel({ result, isLoading, error }: Props) {
 
   const hasIndexes = result.indexRecommendations?.length > 0
   const hasPatterns = result.patternsApplied?.length > 0
-  const hasPlan = result.optimizedPlan?.root != null || result.originalPlan?.root != null
+  const hasPlan = result.optimizedPlan?.rawExplain != null || result.originalPlan?.rawExplain != null
 
   const tabs: { id: ResultTab; label: string; badge?: number }[] = [
     { id: 'query',    label: 'Optimized SQL' },
@@ -184,28 +184,13 @@ export default function ResultsPanel({ result, isLoading, error }: Props) {
             )}
 
             <div className="bg-bg-surface p-4 rounded-lg border border-border">
-              <h3 className="text-sm font-semibold text-text-primary mb-3">EXECUTION PLAN</h3>
-              {(result.optimizedPlan?.root || result.originalPlan?.root) ? (
-                <div className="space-y-4">
-                  <div className="overflow-x-auto pb-2">
-                    <PlanTree node={result.optimizedPlan?.root || result.originalPlan?.root} />
-                  </div>
-                  
-                  {/* NEW: Render the Raw MySQL Table Output! */}
-                  {(result.optimizedPlan?.rawExplain || result.originalPlan?.rawExplain) && (
-                    <div className="mt-4 pt-4 border-t border-border/50">
-                      <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Raw MySQL Output</p>
-                      <pre className="text-xs text-accent bg-bg-base p-3 rounded font-mono overflow-x-auto border border-border/50 whitespace-pre">
-                        {result.optimizedPlan?.rawExplain || result.originalPlan?.rawExplain}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-text-muted italic py-4 text-center border border-dashed border-border rounded">
-                  No visual execution plan available for this query.
-                </p>
-              )}
+              <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+                <span>⚙️</span> MYSQL EXECUTION PLAN
+              </h3>
+              <p className="text-xs text-text-muted mb-3">Raw output generated directly from your live database engine.</p>
+              <pre className="text-xs text-accent bg-bg-base p-4 rounded font-mono overflow-x-auto border border-border/50 whitespace-pre leading-relaxed">
+                {result.optimizedPlan?.rawExplain || result.originalPlan?.rawExplain || 'No plan available.'}
+              </pre>
             </div>
           </div>
         )}
@@ -256,52 +241,6 @@ function ExplanationCard({ app, index }: { app: PatternApplication; index: numbe
           </div>
         </div>
       </div>
-    </div>
-  )
-}
-
-function PlanTree({ node }: { node: any }) {
-  if (!node) return null
-  return (
-    <div className="flex flex-col">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="px-1.5 py-0.5 bg-accent/10 border border-accent/20 rounded text-[10px] text-accent font-bold tracking-wider font-mono">
-          {node.accessType || 'UNKNOWN'}
-        </span>
-        {node.table && (
-          <span className="text-xs font-semibold text-text-primary">
-            {node.table}
-          </span>
-        )}
-        {node.rowEstimate != null && (
-          <span className="text-xs text-text-muted ml-auto">
-            ~{node.rowEstimate.toLocaleString()} rows
-          </span>
-        )}
-      </div>
-      
-      {(node.keyUsed || node.extra) && (
-        <div className="ml-2 pl-4 border-l-2 border-border/50 pb-2">
-          {node.keyUsed && (
-            <p className="text-[11px] text-text-secondary mt-1">
-              <span className="text-text-muted font-medium">Index:</span> <code className="text-accent bg-bg-overlay px-1 rounded">{node.keyUsed}</code>
-            </p>
-          )}
-          {node.extra && (
-            <p className="text-[11px] text-text-secondary mt-1">
-              <span className="text-text-muted font-medium">Extra:</span> {node.extra}
-            </p>
-          )}
-        </div>
-      )}
-
-      {node.children && node.children.length > 0 && (
-        <div className="ml-2 pl-4 border-l-2 border-border mt-1 pt-1 space-y-3">
-          {node.children.map((child: any, i: number) => (
-            <PlanTree key={i} node={child} />
-          ))}
-        </div>
-      )}
     </div>
   )
 }
