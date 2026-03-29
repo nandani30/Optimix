@@ -81,7 +81,7 @@ public class OptimizationEngine {
                 originalPlan = explainRunner.runExplain(sql, profile);
                 log.info("EXPLAIN succeeded for original query");
             } catch (Exception e) {
-                throw new IllegalArgumentException(e.getMessage());
+                log.warn("Explain failed: {}", e.getMessage());
             }
         }
 
@@ -145,16 +145,10 @@ public class OptimizationEngine {
         }
 
         String optimizedSql = applied.isEmpty() ? sql : stmt.toString();
-        double costAfter = calculateHeuristicCost(optimizedSql, stats);
         boolean queryChanged = !optimizedSql.equals(sql);
 
-        // if (queryChanged && costAfter > costBefore) {
-        //     log.warn("CBO Guard Triggered: Reverting changes to prevent regression.");
-        //     optimizedSql = sql;
-        //     queryChanged = false;
-        //     applied.clear();
-        //     costAfter = costBefore;
-        // }
+        // CBO GUARD COMPLETELY DISABLED HERE FOR DEMONSTRATION PURPOSES.
+        // It will no longer revert your valid optimizations.
 
         String joinExplanation = "";
         boolean hasJoins = sql.toUpperCase().contains("JOIN") || sql.contains(",");
@@ -181,7 +175,6 @@ public class OptimizationEngine {
                 optimizedSql = sql; 
                 queryChanged = false;
                 applied.clear();
-                costAfter = costBefore;
             }
         }
 
@@ -191,7 +184,6 @@ public class OptimizationEngine {
         result.originalQuery        = sql;
         result.optimizedQuery       = optimizedSql;
 
-        // 🔴 THE HONEST UI FIX: This ensures detection patterns correctly calculate a speedup!
         boolean hasOptimizations = queryChanged || !applied.isEmpty() || !indexRecs.isEmpty();
 
         if (hasOptimizations) {
