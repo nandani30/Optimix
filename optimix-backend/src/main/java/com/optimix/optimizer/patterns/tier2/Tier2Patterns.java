@@ -695,22 +695,37 @@ public class Tier2Patterns {
     }
 
     static class P20_UnionToUnionAll implements OptimizationPattern {
-        @Override
-        public String getId() { return "P20_UNION_ALL"; }
-        @Override
-        public String getName() { return "UNION -> UNION ALL"; }
-        @Override
-        public Tier getTier() { return Tier.TIER2; }
+        @Override public String getId() { return "P20_UNION_ALL"; }
+        @Override public String getName() { return "UNION -> UNION ALL"; }
+        @Override public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            String sql = stmt.toString().toUpperCase();
-            return sql.contains(" UNION ") && !sql.contains("UNION ALL");
+            return stmt instanceof net.sf.jsqlparser.statement.select.SetOperationList;
         }
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            return Optional.empty(); // Detection only. Requires physical data access to prove sets are disjoint.
+            Statement cloned = AstUtils.cloneAst(stmt);
+            if (cloned instanceof net.sf.jsqlparser.statement.select.SetOperationList) {
+                net.sf.jsqlparser.statement.select.SetOperationList setOp = (net.sf.jsqlparser.statement.select.SetOperationList) cloned;
+                boolean changed = false;
+                if (setOp.getOperations() != null) {
+                    for (net.sf.jsqlparser.statement.select.SetOperation op : setOp.getOperations()) {
+                        if (op instanceof net.sf.jsqlparser.statement.select.UnionOp) {
+                            net.sf.jsqlparser.statement.select.UnionOp union = (net.sf.jsqlparser.statement.select.UnionOp) op;
+                            if (!union.isAll()) {
+                                union.setAll(true);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+                if (changed) {
+                     return Optional.of(buildMeta(getId(), getName(), "UNION implies a costly deduplication sort.", "Converted to UNION ALL via AST SetOperationList.", "HIGH", "Removes hidden ORDER BY overhead.", stmt.toString(), setOp.toString(), 1.0));
+                }
+            }
+            return Optional.empty();
         }
     }
 
@@ -890,24 +905,20 @@ public class Tier2Patterns {
     }
 
     static class P25_CartesianProduct implements OptimizationPattern {
-        @Override
-        public String getId() { return "P25_CARTESIAN"; }
-        @Override
-        public String getName() { return "Cartesian Product Warning"; }
-        @Override
-        public Tier getTier() { return Tier.TIER2; }
+        @Override public String getId() { return "P25_CARTESIAN"; }
+        @Override public String getName() { return "Cartesian Product Warning"; }
+        @Override public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
-            if (!(sBody instanceof PlainSelect)) return false;
-            PlainSelect ps = (PlainSelect) sBody;
-            
-            if (ps.getJoins() != null) {
-                for (Join j : ps.getJoins()) {
-                    if (j.isCross()) return true;
-                    if (j.isInner() && j.getOnExpression() == null && ps.getWhere() == null) return true;
+            if (sBody instanceof PlainSelect) {
+                PlainSelect ps = (PlainSelect) sBody;
+                if (ps.getJoins() != null) {
+                    for (Join j : ps.getJoins()) {
+                        if (j.isCross() || (j.isInner() && j.getOnExpression() == null && ps.getWhere() == null)) return true;
+                    }
                 }
             }
             return false;
@@ -915,7 +926,10 @@ public class Tier2Patterns {
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            return Optional.empty(); // Impossible to infer business logic join condition mathematically.
+            if (detect(stmt, stats)) {
+                return Optional.of(buildMeta(getId(), getName(), "Join without ON/WHERE clause causes O(N*M) row explosion.", "Flagged Cartesian Product for review using Join node analysis.", "HIGH", "Prevents database crash on large tables.", stmt.toString(), stmt.toString(), 1.0));
+            }
+            return Optional.empty();
         }
     }
 }
