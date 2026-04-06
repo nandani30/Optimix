@@ -184,7 +184,7 @@ export default function AuthPage() {
             </p>
             <div className="space-y-4">
               {[
-                { icon: '⚡', text: 'Detects 40 types of SQL inefficiencies automatically' },
+                { icon: '⚡', text: 'Detects various SQL inefficiencies automatically' },
                 { icon: '📝', text: 'Explains every change in plain English' },
                 { icon: '📊', text: 'Shows cost reduction before and after' },
                 { icon: '🔒', text: 'Everything runs locally — your data never leaves your machine' },

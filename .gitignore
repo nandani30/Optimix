@@ -1,0 +1,16 @@
+# Node & Frontend
+node_modules/
+dist/
+dist-electron/
+.env
+
+# Java & Backend
+target/
+*.jar
+*.class
+application.properties
+
+# IDEs and OS Files
+.vscode/
+.idea/
+.DS_Store
