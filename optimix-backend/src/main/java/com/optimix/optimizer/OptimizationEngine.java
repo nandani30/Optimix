@@ -82,6 +82,8 @@ public class OptimizationEngine {
                 log.info("EXPLAIN succeeded for original query");
             } catch (Exception e) {
                 log.warn("Explain failed: {}", e.getMessage());
+                // FAST FAIL: Block the optimization if the table or column doesn't exist in MySQL!
+                throw new IllegalArgumentException("Database Error: " + e.getMessage());
             }
         }
 
