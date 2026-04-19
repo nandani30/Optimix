@@ -5,7 +5,7 @@ Optimix is a cross-platform desktop application designed to parse, analyze, and 
 ## Core Engine Features
 
 * **Multi-Tier Rule-Based Optimization:** Implements over 40 distinct SQL optimization patterns across three tiers, including Predicate Pushdown, Subquery Unnesting, Constant Folding, and Join Predicate Move-Around.
-* **Cost-Based Join Optimizer:** Evaluates multiple execution paths and utilizes a cost-based calculation system to determine the most efficient table join order.
+* **Cost-Based Join Optimizer:** Evaluates multiple execution paths and utilizes a cost-based calculation system to determine the most efficient query.
 * **Security & Authentication:** Manages secure user sessions via JWT and Google OAuth, utilizing Bcrypt for credential hashing.
 * **Local-First Architecture:** Runs entirely offline using an embedded SQLite database for state management, with a standalone Java backend processing the SQL syntax trees via JSqlParser.
 
