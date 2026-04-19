@@ -22,10 +22,6 @@ Optimix is a cross-platform desktop application designed to parse, analyze, and 
 * SQLite & JDBC
 * Maven (Build & Dependency Management)
 
-## System Architecture
-
-> *(Note: Insert your Level 0 / Level 1 DFD or UML Architecture Diagram here)*
-
 ## Installation & Usage
 
 Optimix is distributed as a standalone desktop installer. No command-line setup or server configuration is required.
