@@ -63,8 +63,4 @@ Because this is an independent project, it is not signed with a commercial Apple
 ![History Dashboard](assets/history.png)
 
 ### Optimization Metrics
-<<<<<<< HEAD
-![Metrics Dashboard](assets/dashboard.jpg)
-=======
 ![Metrics Dashboard](assets/dashboard.png)
->>>>>>> 8a726e6 (docs: finalize README with screenshots and project details)
