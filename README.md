@@ -37,7 +37,7 @@ Optimix is distributed as a standalone desktop installer. No command-line setup 
    * **macOS:** Open the `.dmg` and drag the Optimix app into your Applications folder. 
 
 **⚠️ Important Note for macOS Users:**
-Because this is an independent student project, it is not signed with a commercial Apple Developer Certificate. macOS Gatekeeper may initially prevent it from opening. To open the app:
+Because this is an independent project, it is not signed with a commercial Apple Developer Certificate. macOS Gatekeeper may initially prevent it from opening. To open the app:
 1. Open your **Applications** folder.
 2. **Right-click** (or Control-click) the Optimix app and select **Open**.
 3. A warning dialog will appear. Click **Open** again. You will only need to do this the very first time you launch the app.
