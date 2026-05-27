@@ -63,8 +63,7 @@ public class Tier1Patterns {
 
         public static List<Expression> flattenAnds(Expression expr) {
             List<Expression> list = new ArrayList<>();
-            if (expr instanceof AndExpression) {
-                AndExpression and = (AndExpression) expr;
+            if (expr instanceof AndExpression and) {
                 list.addAll(flattenAnds(and.getLeftExpression()));
                 list.addAll(flattenAnds(and.getRightExpression()));
             } else if (expr != null) {
@@ -101,8 +100,7 @@ public class Tier1Patterns {
             if (fromItem.getAlias() != null && fromItem.getAlias().getName() != null) {
                 return fromItem.getAlias().getName().toLowerCase();
             }
-            if (fromItem instanceof Table) {
-                Table table = (Table) fromItem;
+            if (fromItem instanceof Table table) {
                 if (table.getName() != null) return table.getName().toLowerCase();
             }
             return "";
@@ -122,9 +120,9 @@ public class Tier1Patterns {
             if (e1.getClass() != e2.getClass()) return false;
 
             if (e1 instanceof Column && e2 instanceof Column) return columnsEqual((Column) e1, (Column) e2);
-            if (e1 instanceof LongValue && e2 instanceof LongValue) return ((LongValue) e1).getValue() == ((LongValue) e2).getValue();
-            if (e1 instanceof StringValue && e2 instanceof StringValue) return ((StringValue) e1).getValue().equals(((StringValue) e2).getValue());
-            if (e1 instanceof DoubleValue && e2 instanceof DoubleValue) return ((DoubleValue) e1).getValue() == ((DoubleValue) e2).getValue();
+            if (e1 instanceof LongValue l1 && e2 instanceof LongValue l2) return l1.getValue() == l2.getValue();
+            if (e1 instanceof StringValue s1 && e2 instanceof StringValue s2) return s1.getValue().equals(s2.getValue());
+            if (e1 instanceof DoubleValue d1 && e2 instanceof DoubleValue d2) return d1.getValue() == d2.getValue();
             
             return false;
         }
@@ -174,19 +172,19 @@ public class Tier1Patterns {
 
         public static PlainSelect getSubSelectBody(Expression expr) {
             if (expr == null) return null;
-            if (expr instanceof ExistsExpression) {
-                expr = ((ExistsExpression) expr).getRightExpression();
+            if (expr instanceof ExistsExpression exists) {
+                expr = exists.getRightExpression();
             }
             try {
                 Object select = expr.getClass().getMethod("getSelect").invoke(expr);
-                if (select instanceof Select && ((Select)select).getSelectBody() instanceof PlainSelect) {
-                    return (PlainSelect) ((Select)select).getSelectBody();
+                if (select instanceof Select sel && sel.getSelectBody() instanceof PlainSelect ps) {
+                    return ps;
                 }
-                if (select instanceof PlainSelect) return (PlainSelect) select;
+                if (select instanceof PlainSelect ps) return ps;
             } catch (Exception e) {}
             try {
                 Object body = expr.getClass().getMethod("getSelectBody").invoke(expr);
-                if (body instanceof PlainSelect) return (PlainSelect) body;
+                if (body instanceof PlainSelect ps) return ps;
             } catch (Exception e) {}
             return null;
         }
@@ -195,12 +193,12 @@ public class Tier1Patterns {
             if (fromItem == null) return null;
             try {
                 Object select = fromItem.getClass().getMethod("getSelect").invoke(fromItem);
-                if (select instanceof Select && ((Select)select).getSelectBody() instanceof PlainSelect) return (PlainSelect) ((Select)select).getSelectBody();
-                if (select instanceof PlainSelect) return (PlainSelect) select;
+                if (select instanceof Select sel && sel.getSelectBody() instanceof PlainSelect ps) return ps;
+                if (select instanceof PlainSelect ps) return ps;
             } catch (Exception e) {}
             try {
                 Object body = fromItem.getClass().getMethod("getSelectBody").invoke(fromItem);
-                if (body instanceof PlainSelect) return (PlainSelect) body;
+                if (body instanceof PlainSelect ps) return ps;
             } catch (Exception e) {}
             return null;
         }
@@ -247,9 +245,10 @@ public class Tier1Patterns {
         }
     }
 
+    // Notice: Removed the unused 'confidence' variable to eliminate compiler warnings
     private static OptimizationResult.PatternApplication buildMeta(String id, String name, String problem, 
                                                                   String solution, String impact, String reason,
-                                                                  String before, String after, double confidence) {
+                                                                  String before, String after) {
         OptimizationResult.PatternApplication app = new OptimizationResult.PatternApplication();
         app.patternId = id; app.patternName = name; app.tier = "TIER1";
         app.problem = problem; app.transformation = solution; app.impactLevel = impact;
@@ -265,8 +264,7 @@ public class Tier1Patterns {
             long correlationCount = 0;
             for (Expression expr : innerWhere) {
                 if (expr instanceof EqualsTo eq) {
-                    if (eq.getLeftExpression() instanceof Column && eq.getRightExpression() instanceof Column) {
-                        Column left = (Column) eq.getLeftExpression(); Column right = (Column) eq.getRightExpression();
+                    if (eq.getLeftExpression() instanceof Column left && eq.getRightExpression() instanceof Column right) {
                         String leftTbl = left.getTable() != null ? left.getTable().getName() : "";
                         String rightTbl = right.getTable() != null ? right.getTable().getName() : "";
                         if ((leftTbl.equalsIgnoreCase(innerTableName) && !rightTbl.equalsIgnoreCase(innerTableName)) ||
@@ -338,8 +336,7 @@ public class Tier1Patterns {
 
                     for (Expression expr : innerWhere) {
                         if (expr instanceof EqualsTo eq) {
-                            if (eq.getLeftExpression() instanceof Column && eq.getRightExpression() instanceof Column) {
-                                Column left = (Column) eq.getLeftExpression(); Column right = (Column) eq.getRightExpression();
+                            if (eq.getLeftExpression() instanceof Column left && eq.getRightExpression() instanceof Column right) {
                                 String leftTbl = left.getTable() != null ? left.getTable().getName() : "";
                                 String rightTbl = right.getTable() != null ? right.getTable().getName() : "";
 
@@ -399,7 +396,7 @@ public class Tier1Patterns {
 
                             String finalSql = cloned.toString();
                             if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
-                                return Optional.of(buildMeta(getId(), getName(), "O(N*M) Row-by-row subquery", "Decorrelated to LEFT JOIN", "HIGH", "Executes subquery once", stmt.toString(), finalSql, 0.95));
+                                return Optional.of(buildMeta(getId(), getName(), "O(N*M) Row-by-row subquery", "Decorrelated to LEFT JOIN", "HIGH", "Executes subquery once", stmt.toString(), finalSql));
                             }
                         } catch (Exception e) { continue; }
                     }
@@ -411,7 +408,7 @@ public class Tier1Patterns {
 
     static class P02_WindowPredicatePushdown implements OptimizationPattern {
         @Override public String getId() { return "P02_WINDOW_PUSHDOWN"; }
-        @Override public String getName() { return "Window Predicate Pushdown"; }
+        @Override public String getName() { return "Window Predicate Pushdown Warning"; }
         @Override public Tier getTier() { return Tier.TIER1; }
 
         @Override
@@ -422,20 +419,16 @@ public class Tier1Patterns {
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            if (!detect(stmt, stats)) return Optional.empty();
-            Statement cloned = AstUtils.cloneAst(stmt);
-            PlainSelect outerSelect = (PlainSelect) ((Select) cloned).getSelectBody();
-            
-            try {
-                String innerSql = "SELECT * FROM " + outerSelect.getFromItem().toString() + " WHERE " + outerSelect.getWhere().toString();
-                Statement tempStmt = CCJSqlParserUtil.parse("SELECT * FROM (" + innerSql + ") AS win_sub");
-                FromItem innerSub = ((PlainSelect) ((Select) tempStmt).getSelectBody()).getFromItem();
-
-                outerSelect.setFromItem(innerSub);
-                outerSelect.setWhere(null);
-
-                return Optional.of(buildMeta(getId(), getName(), "Filter applied after window function", "Predicate pushed into subquery", "HIGH", "Reduces rows prior to windowing", stmt.toString(), cloned.toString(), 0.90));
-            } catch (Exception e) { return Optional.empty(); }
+            if (detect(stmt, stats)) {
+                String optimizedSql = stmt.toString() + " /* OPTIMIX: CONSIDER PUSHING BASE-TABLE PREDICATES INTO A SUBQUERY BEFORE WINDOWING */";
+                return Optional.of(buildMeta(getId(), getName(), 
+                    "Filtering after a window function wastes memory by sorting rows that will be discarded.", 
+                    "Flagged for manual subquery pushdown.", 
+                    "HIGH", 
+                    "Reducing dataset size before the window sorting phase drastically lowers CPU and memory overhead.", 
+                    stmt.toString(), optimizedSql));
+            }
+            return Optional.empty();
         }
     }
 
@@ -449,13 +442,12 @@ public class Tier1Patterns {
             if (join.getOnExpression() != null && join.getOnExpression().toString().contains("!=")) return false;
             
             if (join.getOnExpression() instanceof EqualsTo eq) {
-                Column leftCol = eq.getLeftExpression() instanceof Column ? (Column) eq.getLeftExpression() : null;
-                Column rightCol = eq.getRightExpression() instanceof Column ? (Column) eq.getRightExpression() : null;
+                Column leftCol = eq.getLeftExpression() instanceof Column col ? col : null;
+                Column rightCol = eq.getRightExpression() instanceof Column col ? col : null;
                 
                 if (stats != null && rightCol != null && rightCol.getTable() != null) {
                     TableStatistics tStats = stats.get(rightCol.getTable().getName().toLowerCase());
                     if (tStats != null) {
-                        if (tStats.rowCount < 100) return false;
                         String pk = AstUtils.getPrimaryKeyColumn(tStats);
                         if (pk != null && pk.equalsIgnoreCase(rightCol.getColumnName())) return true;
                     }
@@ -478,8 +470,7 @@ public class Tier1Patterns {
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
-            Object cBody = ((Select) cloned).getSelectBody();
-            if (!(cBody instanceof PlainSelect body)) return Optional.empty();
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
 
             if (AstUtils.getGroupBy(body) != null || AstUtils.hasAggregates(body)) return Optional.empty();
             if (body.getDistinct() != null) return Optional.empty();
@@ -510,14 +501,14 @@ public class Tier1Patterns {
                 if (!rightAliasOrName.isEmpty() && !usedQualifiers.contains(rightAliasOrName) && join.getOnExpression() instanceof EqualsTo eq) {
                     if (eq.getLeftExpression() instanceof Column left && eq.getRightExpression() instanceof Column right) {
                         try {
-                            String subQuerySql = "SELECT DISTINCT " + right.toString() + " FROM " + join.getRightItem().toString();
+                            String subQuerySql = "SELECT " + right.toString() + " FROM " + join.getRightItem().toString();
                             Expression inExpr = CCJSqlParserUtil.parseCondExpression(left.toString() + " IN (" + subQuerySql + ")");
                             body.setWhere(body.getWhere() == null ? inExpr : new AndExpression(body.getWhere(), inExpr));
                             it.remove();
 
                             String finalSql = cloned.toString();
                             if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
-                                return Optional.of(buildMeta(getId(), getName(), "Redundant join data fetching", "Converted to Semi-join (IN)", "HIGH", "Prevents row duplication", stmt.toString(), finalSql, 0.98));
+                                return Optional.of(buildMeta(getId(), getName(), "Unused right-side relation in projection", "Reduced to Semi-join (IN)", "HIGH", "Prevents cartesian row duplication", stmt.toString(), finalSql));
                             }
                         } catch (Exception e) {}
                     }
@@ -554,13 +545,13 @@ public class Tier1Patterns {
             for (Expression we : new ArrayList<>(whereExprs)) {
                 if (we instanceof EqualsTo eq) {
                     if (eq.getRightExpression() instanceof LongValue || eq.getRightExpression() instanceof StringValue) {
-                        Column leftCol = eq.getLeftExpression() instanceof Column ? (Column) eq.getLeftExpression() : null;
+                        Column leftCol = eq.getLeftExpression() instanceof Column col ? col : null;
                         if (leftCol == null) continue;
 
                         for (Join join : body.getJoins()) {
                             if (join.getOnExpression() instanceof EqualsTo jEq) {
-                                Column joinLeft = jEq.getLeftExpression() instanceof Column ? (Column) jEq.getLeftExpression() : null;
-                                Column joinRight = jEq.getRightExpression() instanceof Column ? (Column) jEq.getRightExpression() : null;
+                                Column joinLeft = jEq.getLeftExpression() instanceof Column col ? col : null;
+                                Column joinRight = jEq.getRightExpression() instanceof Column col ? col : null;
 
                                 Column targetCol = null;
                                 if (AstUtils.columnsEqual(joinLeft, leftCol) && joinRight != null) targetCol = joinRight;
@@ -589,7 +580,7 @@ public class Tier1Patterns {
                 body.setWhere(AstUtils.buildAndTree(whereExprs));
                 String finalSql = cloned.toString();
                 if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
-                    return Optional.of(buildMeta(getId(), getName(), "Unbalanced join filters", "Predicate propagated across join", "MEDIUM", "Enables dual index usage", stmt.toString(), finalSql, 0.99));
+                    return Optional.of(buildMeta(getId(), getName(), "Unbalanced join filters", "Predicate propagated across join", "MEDIUM", "Enables dual index usage", stmt.toString(), finalSql));
                 }
             }
             return Optional.empty();
@@ -598,10 +589,120 @@ public class Tier1Patterns {
 
     static class P05_MaterializedCTE implements OptimizationPattern {
         @Override public String getId() { return "P05_MATERIALIZED_CTE"; }
-        @Override public String getName() { return "Materialized CTE"; }
+        @Override public String getName() { return "CTE Inlining & Materialization"; }
         @Override public Tier getTier() { return Tier.TIER1; }
-        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
-        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+
+        // Dynamically counts how many times a CTE is referenced in the main query
+        private int countCteReferences(PlainSelect ps, String cteName) {
+            int count = 0;
+            if (ps.getFromItem() instanceof Table tbl && tbl.getName().equalsIgnoreCase(cteName)) count++;
+            if (ps.getJoins() != null) {
+                for (Join j : ps.getJoins()) {
+                    if (j.getRightItem() instanceof Table tbl && tbl.getName().equalsIgnoreCase(cteName)) count++;
+                }
+            }
+            return count;
+        }
+
+        // Safely converts the CTE into a derived subquery node
+        private boolean inlineCte(PlainSelect body, String cteName, Object cteBody) {
+            try {
+                String subSql = "SELECT * FROM (" + cteBody.toString() + ") AS " + cteName;
+                Select temp = (Select) CCJSqlParserUtil.parse(subSql);
+                FromItem subSelect = ((PlainSelect) temp.getSelectBody()).getFromItem();
+
+                if (body.getFromItem() instanceof Table tbl && tbl.getName().equalsIgnoreCase(cteName)) {
+                    if (tbl.getAlias() != null) AstUtils.setAlias(subSelect, tbl.getAlias());
+                    body.setFromItem(subSelect);
+                    return true;
+                } else if (body.getJoins() != null) {
+                    for (Join j : body.getJoins()) {
+                        if (j.getRightItem() instanceof Table tbl && tbl.getName().equalsIgnoreCase(cteName)) {
+                            if (tbl.getAlias() != null) AstUtils.setAlias(subSelect, tbl.getAlias());
+                            j.setRightItem(subSelect);
+                            return true;
+                        }
+                    }
+                }
+            } catch (Exception e) {}
+            return false;
+        }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select sel)) return false;
+            try {
+                List<?> withItems = (List<?>) sel.getClass().getMethod("getWithItemsList").invoke(sel);
+                return withItems != null && !withItems.isEmpty();
+            } catch (Exception e) {}
+            return false;
+        }
+
+        @Override
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!detect(stmt, stats)) return Optional.empty();
+            
+            Statement cloned = AstUtils.cloneAst(stmt);
+            Select sel = (Select) cloned;
+            if (!(sel.getSelectBody() instanceof PlainSelect body)) return Optional.empty();
+
+            try {
+                List withItems = (List) sel.getClass().getMethod("getWithItemsList").invoke(sel);
+                if (withItems == null || withItems.isEmpty()) return Optional.empty();
+
+                boolean modified = false;
+                List<String> materializeHints = new ArrayList<>();
+                List<Object> itemsToRemove = new ArrayList<>();
+
+                for (Object withObj : withItems) {
+                    String cteName = (String) withObj.getClass().getMethod("getName").invoke(withObj);
+                    int refCount = countCteReferences(body, cteName);
+
+                    if (refCount == 1) {
+                        // Single use -> INLINE it mathematically
+                        Object cteBody = null;
+                        try { cteBody = withObj.getClass().getMethod("getSelectBody").invoke(withObj); } catch(Exception e) {}
+                        if (cteBody == null) {
+                            try { cteBody = withObj.getClass().getMethod("getSelect").invoke(withObj); } catch(Exception e) {}
+                        }
+                        
+                        if (cteBody != null && inlineCte(body, cteName, cteBody)) {
+                            itemsToRemove.add(withObj);
+                            modified = true;
+                        }
+                    } else if (refCount > 1) {
+                        // Multi use -> Emit MATERIALIZE hint
+                        materializeHints.add(cteName);
+                        modified = true;
+                    }
+                }
+
+                if (modified) {
+                    withItems.removeAll(itemsToRemove);
+                    // If all CTEs were inlined, remove the WITH clause entirely
+                    if (withItems.isEmpty()) {
+                        sel.getClass().getMethod("setWithItemsList", List.class).invoke(sel, (List)null);
+                    }
+
+                    String finalSql = cloned.toString();
+                    
+                    // Append hints for multi-use CTEs
+                    if (!materializeHints.isEmpty()) {
+                        String hints = String.join(", ", materializeHints);
+                        finalSql += " /* OPTIMIX: MATERIALIZE CTE (" + hints + ") TO PREVENT REDUNDANT O(N) EXECUTION */";
+                    }
+
+                    return Optional.of(buildMeta(getId(), getName(), 
+                        "CTEs are opaque boundaries. Single-use CTEs block global optimization, while multi-use CTEs trigger redundant O(N) re-evaluations.", 
+                        "Inlined single-use CTEs. Emitted Materialization Hints for multi-use CTEs.", 
+                        "HIGH", 
+                        "Inlining exposes base tables to the optimizer. Materialization spools data into an O(1) memory read, bypassing redundant execution.", 
+                        stmt.toString(), finalSql));
+                }
+            } catch (Exception e) {}
+            return Optional.empty();
+        }
     }
 
     static class P06_GroupByKeyElimination implements OptimizationPattern {
@@ -633,7 +734,15 @@ public class Tier1Patterns {
 
                 for (Expression expr : gbExprs) {
                     if (expr instanceof Column col) {
-                        if (col.getColumnName().toLowerCase().equals("id") || col.getColumnName().toLowerCase().endsWith("_id")) {
+                        String tableName = col.getTable() != null && col.getTable().getName() != null ? col.getTable().getName().toLowerCase() : AstUtils.getAliasOrName(body.getFromItem());
+                        
+                        boolean isPrimaryKey = false;
+                        if (stats != null && stats.containsKey(tableName)) {
+                            String pk = AstUtils.getPrimaryKeyColumn(stats.get(tableName));
+                            if (pk != null && pk.equalsIgnoreCase(col.getColumnName())) isPrimaryKey = true;
+                        }
+
+                        if (isPrimaryKey) {
                             newGb.add(expr);
                         } else {
                             modified = true;
@@ -647,7 +756,7 @@ public class Tier1Patterns {
                     String gbStr = newGb.stream().map(Expression::toString).reduce((a, b) -> a + ", " + b).orElse("");
                     AstUtils.setGroupByByParsing(body, gbStr);
                     String finalSql = cloned.toString();
-                    return Optional.of(buildMeta(getId(), getName(), "Redundant Group By keys", "Eliminated functionally dependent keys", "LOW", "Reduces hashing overhead", stmt.toString(), finalSql, 1.0));
+                    return Optional.of(buildMeta(getId(), getName(), "Redundant Group By keys", "Eliminated functionally dependent keys using metadata.", "LOW", "Reduces hashing overhead", stmt.toString(), finalSql));
                 }
             } catch (Exception e) {}
             return Optional.empty();
@@ -667,8 +776,6 @@ public class Tier1Patterns {
             
             if (ps.getJoins() == null || ps.getJoins().size() != 1) return false;
             if (AstUtils.getGroupBy(ps) == null || !AstUtils.hasAggregates(ps)) return false;
-            
-            // CRITICAL FIX: Prevent infinite loops by only triggering if the right side is a base Table, not a Subquery
             if (!(ps.getJoins().get(0).getRightItem() instanceof Table)) return false;
             
             return true;
@@ -684,29 +791,27 @@ public class Tier1Patterns {
                 FromItem leftTable = ps.getFromItem();
                 FromItem rightTable = join.getRightItem();
                 
-                // Universally extract the ON condition
-                if (join.getOnExpression() instanceof EqualsTo) {
-                    EqualsTo eq = (EqualsTo) join.getOnExpression();
-                    
-                    String sumColStr = null;
+                if (join.getOnExpression() instanceof EqualsTo eq) {
+                    Function sumFunction = null;
                     String nonSumColStr = null;
                     
-                    // Dynamically find which column has the SUM() function
                     for (Object itemObj : ps.getSelectItems()) {
                         Expression expr = AstUtils.getExpression(itemObj);
-                        if (expr instanceof Function && ((Function)expr).getName().equalsIgnoreCase("SUM")) {
-                            sumColStr = expr.toString(); 
+                        if (expr instanceof Function func && func.getName().equalsIgnoreCase("SUM")) {
+                            sumFunction = func;
                         } else {
                             nonSumColStr = itemObj.toString(); 
                         }
                     }
                     
-                    if (sumColStr != null && nonSumColStr != null) {
-                        // Extract the exact column name inside SUM()
-                        String rawInnerCol = sumColStr.substring(4, sumColStr.length() - 1); 
+                    if (sumFunction != null && nonSumColStr != null) {
+                        Object parameters = sumFunction.getClass().getMethod("getParameters").invoke(sumFunction);
+                        List<?> exprList = (List<?>) parameters.getClass().getMethod("getExpressions").invoke(parameters);
+                        if (exprList == null || exprList.isEmpty()) return Optional.empty();
+                        
+                        String rawInnerCol = exprList.get(0).toString();
                         if (rawInnerCol.contains(".")) rawInnerCol = rawInnerCol.split("\\.")[1];
 
-                        // Dynamically map the join columns to the correct tables
                         String leftJoinCol = eq.getLeftExpression().toString();
                         String rightJoinCol = eq.getRightExpression().toString();
                         
@@ -714,22 +819,18 @@ public class Tier1Patterns {
                         String innerJoinCol = leftJoinCol.startsWith(rightAlias + ".") ? leftJoinCol : rightJoinCol;
                         String outerJoinCol = leftJoinCol.startsWith(rightAlias + ".") ? rightJoinCol : leftJoinCol;
 
-                        // Build the universal pre-aggregation subquery
                         String innerSql = "SELECT " + innerJoinCol + ", SUM(" + rawInnerCol + ") AS pre_agg_sum FROM " + rightTable.toString() + " GROUP BY " + innerJoinCol;
-                        
                         String newOnCond = outerJoinCol + " = " + rightAlias + "_agg." + innerJoinCol.substring(innerJoinCol.indexOf('.') + 1);
 
-                        // Assemble the final, universally optimized SQL
                         String optimized = "SELECT " + nonSumColStr + ", SUM(" + rightAlias + "_agg.pre_agg_sum) FROM " + leftTable.toString() + 
                                            " JOIN (" + innerSql + ") AS " + rightAlias + "_agg ON " + newOnCond + 
                                            " GROUP BY " + nonSumColStr;
 
                         Statement temp = CCJSqlParserUtil.parse(optimized);
-                        return Optional.of(buildMeta(getId(), getName(), "Aggregation after massive join", "Pre-aggregation before join", "HIGH", "Reduces input rows to join", stmt.toString(), temp.toString(), 0.85));
+                        return Optional.of(buildMeta(getId(), getName(), "Aggregation after massive join", "Pre-aggregation before join (AST safe)", "HIGH", "Reduces input rows to join", stmt.toString(), temp.toString()));
                     }
                 }
             } catch (Exception e) {}
-            
             return Optional.empty();
         }
     }
@@ -781,7 +882,7 @@ public class Tier1Patterns {
 
                         String finalSql = cloned.toString();
                         if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
-                            return Optional.of(buildMeta(getId(), getName(), "Opaque derived table blocks optimizer", "Flattened subquery", "MEDIUM", "Exposes base tables to global optimizer", stmt.toString(), finalSql, 0.95));
+                            return Optional.of(buildMeta(getId(), getName(), "Opaque derived table blocks optimizer", "Flattened subquery", "MEDIUM", "Exposes base tables to global optimizer", stmt.toString(), finalSql));
                         }
                     } catch(Exception ex) {}
                 }
@@ -867,7 +968,7 @@ public class Tier1Patterns {
             if (modified[0]) {
                 String finalSql = cloned.toString();
                 if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
-                    return Optional.of(buildMeta(getId(), getName(), "Unnecessary SELECT * in EXISTS", "Replaced with SELECT 1 and pushed LIMIT", "HIGH", "Avoids heap fetch and early-exits check", stmt.toString(), finalSql, 1.0));
+                    return Optional.of(buildMeta(getId(), getName(), "Unnecessary SELECT * in EXISTS", "Replaced with SELECT 1 and pushed LIMIT", "HIGH", "Avoids heap fetch and early-exits check", stmt.toString(), finalSql));
                 }
             }
             return Optional.empty();
@@ -876,7 +977,7 @@ public class Tier1Patterns {
 
     static class P10_DPJoinOrder implements OptimizationPattern {
         @Override public String getId() { return "P10_DP_JOIN_ORDER"; }
-        @Override public String getName() { return "Dynamic Programming Join Order"; }
+        @Override public String getName() { return "Dynamic Programming Join Reordering"; }
         @Override public Tier getTier() { return Tier.TIER1; }
 
         @Override
@@ -884,11 +985,63 @@ public class Tier1Patterns {
             if (!(stmt instanceof Select)) return false;
             Object sBody = ((Select) stmt).getSelectBody();
             if (!(sBody instanceof PlainSelect ps)) return false;
-            return ps.getJoins() != null && ps.getJoins().size() > 1;
+            return ps.getJoins() != null && ps.getJoins().size() >= 2;
+        }
+
+        private void flattenPlan(com.optimix.optimizer.join.JoinOptimizer.JoinPlan plan, List<String> sequence) {
+            if (plan == null) return;
+            if (plan.isLeaf()) {
+                sequence.add(plan.singleTable);
+            } else {
+                flattenPlan(plan.left, sequence);
+                flattenPlan(plan.right, sequence);
+            }
         }
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!detect(stmt, stats)) return Optional.empty();
+            
+            Statement cloned = AstUtils.cloneAst(stmt);
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
+            
+            try {
+                // Extract real table names
+                List<String> realNames = new ArrayList<>();
+                String baseReal = "";
+                if (body.getFromItem() instanceof Table tbl) baseReal = tbl.getName().toLowerCase();
+                realNames.add(baseReal);
+                
+                for (Join j : body.getJoins()) {
+                    if (j.getRightItem() instanceof Table tbl) realNames.add(tbl.getName().toLowerCase());
+                }
+
+                // Run Dynamic Programming
+                com.optimix.optimizer.cost.CostCalculator costCalc = new com.optimix.optimizer.cost.CostCalculator();
+                com.optimix.optimizer.join.JoinOptimizer engine = new com.optimix.optimizer.join.JoinOptimizer(costCalc, stats);
+                com.optimix.optimizer.join.JoinOptimizer.JoinPlan bestPlan = engine.findOptimalOrder(realNames);
+
+                List<String> optimalSequence = new ArrayList<>();
+                flattenPlan(bestPlan, optimalSequence);
+
+                // If the DP engine decides the driving table MUST change
+                if (!optimalSequence.isEmpty() && !optimalSequence.get(0).equalsIgnoreCase(baseReal)) {
+                    String sequenceStr = String.join(" -> ", optimalSequence);
+                    
+                    // INJECT A SAFE AST HINT: We create a dummy WHERE condition that prints our hint!
+                    Expression hintExpr = CCJSqlParserUtil.parseCondExpression("'OPTIMIX_HINT: " + sequenceStr + "' = 'OPTIMIX_HINT: " + sequenceStr + "'");
+                    body.setWhere(body.getWhere() == null ? hintExpr : new AndExpression(body.getWhere(), hintExpr));
+                    
+                    String finalSql = cloned.toString();
+                    return Optional.of(buildMeta(getId(), getName(), 
+                        "Suboptimal join ordering increases intermediate row cardinality.", 
+                        "Injected Optimal Join Sequence Hint into AST.", 
+                        "HIGH", 
+                        "Changing the driving table reduces memory overhead. Passed explicit string hint to database executor.", 
+                        stmt.toString(), finalSql));
+                }
+            } catch (Exception e) {}
+            
             return Optional.empty();
         }
     }

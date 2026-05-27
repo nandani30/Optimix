@@ -723,10 +723,43 @@ public class Tier3Patterns {
 
     static class P38_ScalarToJoin implements OptimizationPattern {
         @Override public String getId() { return "P38_SCALAR_TO_JOIN"; }
-        @Override public String getName() { return "Scalar to Join"; }
+        @Override public String getName() { return "Scalar Subquery to JOIN Warning"; }
         @Override public Tier getTier() { return Tier.TIER3; }
-        @Override public boolean detect(Statement stmt, Map<String, TableStatistics> stats) { return false; }
-        @Override public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) { return Optional.empty(); }
+
+        @Override
+        public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
+            if (!(stmt instanceof Select s) || !(s.getSelectBody() instanceof PlainSelect ps)) return false;
+            if (ps.getSelectItems() == null) return false;
+            
+            // Loop through the SELECT columns looking for a nested subquery
+            for (Object item : ps.getSelectItems()) {
+                PlainSelect inner = AstUtils.getSubSelectBody(AstUtils.getExpression(item));
+                if (inner != null) return true; // Found a scalar subquery!
+            }
+            return false;
+        }
+
+        @Override
+        public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
+            if (detect(stmt, stats)) {
+                // We do NOT mutate the AST safely because automatic decorrelation is risky.
+                // Instead, we append a warning comment for the developer.
+                String optimizedSql = stmt.toString() + " /* OPTIMIX: SCALAR SUBQUERY DETECTED. CONSIDER USING A JOIN */";
+                
+                return Optional.of(buildMeta(
+                    getId(), 
+                    getName(), 
+                    "Scalar subqueries in the SELECT clause execute row-by-row, causing severe N+1 performance degradation.", 
+                    "Flagged subquery for manual conversion to a JOIN.", 
+                    "MEDIUM", 
+                    "Converting to a JOIN allows the database to process the data in bulk sets rather than slow loops.", 
+                    stmt.toString(), 
+                    optimizedSql, 
+                    1.0
+                ));
+            }
+            return Optional.empty();
+        }
     }
 
     static class P39_Sargability implements OptimizationPattern {

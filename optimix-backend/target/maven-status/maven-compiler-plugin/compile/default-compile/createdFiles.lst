@@ -26,6 +26,7 @@ com/optimix/optimizer/patterns/tier2/Tier2Patterns$AstUtils.class
 com/optimix/model/dto/UserDto.class
 com/optimix/optimizer/join/JoinOptimizer$JoinAlgorithm.class
 com/optimix/optimizer/OptimizationEngine.class
+com/optimix/optimizer/patterns/tier2/Tier2Patterns$P23_PredicatePushdown$1.class
 com/optimix/optimizer/patterns/tier3/Tier3Patterns$P27_ConstantFolding$1.class
 com/optimix/optimizer/patterns/tier2/Tier2Patterns$P13_ScalarSubqueryToJoin.class
 com/optimix/api/middleware/RateLimitMiddleware.class

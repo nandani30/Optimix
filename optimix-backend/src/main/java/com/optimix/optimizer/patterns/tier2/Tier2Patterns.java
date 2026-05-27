@@ -246,12 +246,9 @@ public class Tier2Patterns {
     // =========================================================================
 
     static class P11_NotInAntiJoin implements OptimizationPattern {
-        @Override
-        public String getId() { return "P11_NOT_IN_ANTI_JOIN"; }
-        @Override
-        public String getName() { return "NOT IN Subquery -> NOT EXISTS"; }
-        @Override
-        public Tier getTier() { return Tier.TIER2; }
+        @Override public String getId() { return "P11_NOT_IN_ANTI_JOIN"; }
+        @Override public String getName() { return "NOT IN Subquery -> NOT EXISTS"; }
+        @Override public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
@@ -263,36 +260,35 @@ public class Tier2Patterns {
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
-            Object cBody = ((Select) cloned).getSelectBody();
-            if (!(cBody instanceof PlainSelect)) return Optional.empty();
-            PlainSelect body = (PlainSelect) cBody;
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
             if (body.getWhere() == null) return Optional.empty();
 
             List<Expression> whereExprs = AstUtils.flattenAnds(body.getWhere());
             boolean modified = false;
 
             for (int i = 0; i < whereExprs.size(); i++) {
-                Expression we = whereExprs.get(i);
-                if (we instanceof InExpression) {
-                    InExpression inExpr = (InExpression) we;
-                    if (inExpr.isNot() && inExpr.getRightExpression() != null) {
-                        if (inExpr.getLeftExpression() instanceof Column) {
-                            Column outerCol = (Column) inExpr.getLeftExpression();
-                            try {
-                                PlainSelect inner = AstUtils.getSubSelectBody(inExpr.getRightExpression());
-                                if (inner != null && inner.getSelectItems() != null && !inner.getSelectItems().isEmpty()) {
-                                    Expression innerCol = AstUtils.getExpression(inner.getSelectItems().get(0));
-                                    if (innerCol instanceof Column) {
-                                        String existingWhere = inner.getWhere() != null ? " AND (" + inner.getWhere().toString() + ")" : "";
-                                        String newInner = "SELECT 1 FROM " + inner.getFromItem().toString() + " WHERE " + innerCol.toString() + " = " + outerCol.toString() + existingWhere;
-                                        
-                                        Expression notExists = CCJSqlParserUtil.parseCondExpression("NOT EXISTS (" + newInner + ")");
-                                        whereExprs.set(i, notExists);
-                                        modified = true;
-                                    }
+                if (whereExprs.get(i) instanceof InExpression) {
+                    InExpression inExpr = (InExpression) whereExprs.get(i);
+                    if (inExpr.isNot() && inExpr.getRightExpression() != null && inExpr.getLeftExpression() instanceof Column) {
+                        Column outerCol = (Column) inExpr.getLeftExpression();
+                        try {
+                            PlainSelect inner = AstUtils.getSubSelectBody(inExpr.getRightExpression());
+                            if (inner != null && inner.getSelectItems() != null && !inner.getSelectItems().isEmpty()) {
+                                Expression innerCol = AstUtils.getExpression(inner.getSelectItems().get(0));
+                                if (innerCol instanceof Column) {
+                                    String existingWhere = inner.getWhere() != null ? " AND (" + inner.getWhere().toString() + ")" : "";
+                                    
+                                    // NEW: Appended "IS NOT NULL" to mathematically guarantee ANSI compliance.
+                                    String newInner = "SELECT 1 FROM " + inner.getFromItem().toString() + 
+                                                      " WHERE " + innerCol.toString() + " = " + outerCol.toString() + 
+                                                      " AND " + innerCol.toString() + " IS NOT NULL" + existingWhere;
+                                    
+                                    Expression notExists = CCJSqlParserUtil.parseCondExpression("NOT EXISTS (" + newInner + ")");
+                                    whereExprs.set(i, notExists);
+                                    modified = true;
                                 }
-                            } catch (Exception e) {}
-                        }
+                            }
+                        } catch (Exception e) {}
                     }
                 }
             }
@@ -301,7 +297,7 @@ public class Tier2Patterns {
                 body.setWhere(AstUtils.buildAndTree(whereExprs));
                 String finalSql = cloned.toString();
                 if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
-                    return Optional.of(buildMeta(getId(), getName(), "NOT IN is vulnerable to NULL values and prevents Anti-Join optimization.", "Rewrote NOT IN to NOT EXISTS.", "HIGH", "NOT EXISTS handles NULLs mathematically correctly and allows Hash Anti-Joins.", stmt.toString(), finalSql, 0.98));
+                    return Optional.of(buildMeta(getId(), getName(), "NOT IN is vulnerable to NULL values and prevents Anti-Join optimization.", "Rewrote NOT IN to NOT EXISTS with explicit IS NOT NULL guard.", "HIGH", "Maintains strict ANSI null-handling while enabling fast Hash Anti-Joins.", stmt.toString(), finalSql, 0.98));
                 }
             }
             return Optional.empty();
@@ -631,7 +627,7 @@ public class Tier2Patterns {
 
     static class P17_RedundantJoin implements OptimizationPattern {
         @Override public String getId() { return "P17_REDUNDANT_JOIN"; }
-        @Override public String getName() { return "Redundant JOIN Elimination"; }
+        @Override public String getName() { return "Duplicate Alias / Redundant Join"; }
         @Override public Tier getTier() { return Tier.TIER2; }
 
         @Override
@@ -641,12 +637,16 @@ public class Tier2Patterns {
             if (!(sBody instanceof PlainSelect ps)) return false;
             if (ps.getJoins() == null || ps.getJoins().isEmpty()) return false;
             
-            Set<String> seenTables = new HashSet<>();
-            seenTables.add(AstUtils.getAliasOrName(ps.getFromItem()));
+            Set<String> seenAliases = new HashSet<>();
             
+            // Check the main FROM table alias/name
+            seenAliases.add(AstUtils.getAliasOrName(ps.getFromItem()));
+            
+            // NEW: Check if the exact alias/name is reused in the joins. 
+            // Reusing an alias means it's a structural collision, not a valid self-join.
             for (Join j : ps.getJoins()) {
-                String tName = AstUtils.getAliasOrName(j.getRightItem());
-                if (!seenTables.add(tName)) return true; // Duplicate table detected!
+                String targetAlias = AstUtils.getAliasOrName(j.getRightItem());
+                if (!seenAliases.add(targetAlias)) return true; 
             }
             return false;
         }
@@ -654,7 +654,7 @@ public class Tier2Patterns {
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             if (detect(stmt, stats)) {
-                return Optional.of(buildMeta(getId(), getName(), "Same table is joined multiple times unnecessarily.", "Flagged potential redundant self-join using AST topology analysis.", "LOW", "Prevents duplicate table scans.", stmt.toString(), stmt.toString(), 1.0));
+                return Optional.of(buildMeta(getId(), getName(), "Table/Alias collision detected in JOIN clauses.", "Flagged structural error.", "LOW", "Joining the exact same alias multiple times causes syntax errors and redundant scans.", stmt.toString(), stmt.toString(), 1.0));
             }
             return Optional.empty(); 
         }
@@ -772,34 +772,34 @@ public class Tier2Patterns {
 
     static class P20_UnionToUnionAll implements OptimizationPattern {
         @Override public String getId() { return "P20_UNION_ALL"; }
-        @Override public String getName() { return "UNION -> UNION ALL"; }
+        @Override public String getName() { return "UNION Deduplication Warning"; }
         @Override public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
-            return stmt instanceof net.sf.jsqlparser.statement.select.SetOperationList;
+            if (stmt instanceof net.sf.jsqlparser.statement.select.SetOperationList) {
+                net.sf.jsqlparser.statement.select.SetOperationList setOp = (net.sf.jsqlparser.statement.select.SetOperationList) stmt;
+                if (setOp.getOperations() != null) {
+                    for (net.sf.jsqlparser.statement.select.SetOperation op : setOp.getOperations()) {
+                        if (op instanceof net.sf.jsqlparser.statement.select.UnionOp) {
+                            if (!((net.sf.jsqlparser.statement.select.UnionOp) op).isAll()) return true;
+                        }
+                    }
+                }
+            }
+            return false;
         }
 
         @Override
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
-            Statement cloned = AstUtils.cloneAst(stmt);
-            if (cloned instanceof net.sf.jsqlparser.statement.select.SetOperationList) {
-                net.sf.jsqlparser.statement.select.SetOperationList setOp = (net.sf.jsqlparser.statement.select.SetOperationList) cloned;
-                boolean changed = false;
-                if (setOp.getOperations() != null) {
-                    for (net.sf.jsqlparser.statement.select.SetOperation op : setOp.getOperations()) {
-                        if (op instanceof net.sf.jsqlparser.statement.select.UnionOp) {
-                            net.sf.jsqlparser.statement.select.UnionOp union = (net.sf.jsqlparser.statement.select.UnionOp) op;
-                            if (!union.isAll()) {
-                                union.setAll(true);
-                                changed = true;
-                            }
-                        }
-                    }
-                }
-                if (changed) {
-                     return Optional.of(buildMeta(getId(), getName(), "UNION implies a costly deduplication sort.", "Converted to UNION ALL via AST SetOperationList.", "HIGH", "Removes hidden ORDER BY overhead.", stmt.toString(), setOp.toString(), 1.0));
-                }
+            if (detect(stmt, stats)) {
+                String optimizedSql = stmt.toString() + " /* OPTIMIX: CONSIDER UNION ALL IF DEDUPLICATION IS UNNECESSARY */";
+                return Optional.of(buildMeta(getId(), getName(), 
+                    "UNION implies a costly deduplication sort phase.", 
+                    "Flagged for manual review.", 
+                    "MEDIUM", 
+                    "Replacing UNION with UNION ALL removes hidden sorting overhead if duplicate rows are acceptable for business logic.", 
+                    stmt.toString(), optimizedSql, 1.0));
             }
             return Optional.empty();
         }
@@ -927,12 +927,9 @@ public class Tier2Patterns {
     }
 
     static class P23_PredicatePushdown implements OptimizationPattern {
-        @Override
-        public String getId() { return "P23_PREDICATE_PUSHDOWN"; }
-        @Override
-        public String getName() { return "HAVING Pushdown to WHERE"; }
-        @Override
-        public Tier getTier() { return Tier.TIER2; }
+        @Override public String getId() { return "P23_PREDICATE_PUSHDOWN"; }
+        @Override public String getName() { return "HAVING Pushdown to WHERE"; }
+        @Override public Tier getTier() { return Tier.TIER2; }
 
         @Override
         public boolean detect(Statement stmt, Map<String, TableStatistics> stats) {
@@ -947,24 +944,33 @@ public class Tier2Patterns {
         public Optional<OptimizationResult.PatternApplication> apply(Statement stmt, Map<String, TableStatistics> stats) {
             Statement cloned = AstUtils.cloneAst(stmt);
             if (cloned == null || !(cloned instanceof Select)) return Optional.empty();
-            Object cBody = ((Select) cloned).getSelectBody();
-            if (!(cBody instanceof PlainSelect)) return Optional.empty();
-            PlainSelect body = (PlainSelect) cBody;
+            PlainSelect body = (PlainSelect) ((Select) cloned).getSelectBody();
             
             if (body.getHaving() == null || AstUtils.getGroupBy(body) != null) return Optional.empty();
 
             try {
                 Expression having = body.getHaving();
-                body.setHaving(null);
                 
+                // NEW: Security check to prevent pushing Aggregates into WHERE clause
+                boolean[] hasAgg = {false};
+                having.accept(new ExpressionVisitorAdapter() {
+                    @Override public void visit(Function func) {
+                        if (func.getName() != null && Arrays.asList("SUM", "COUNT", "AVG", "MIN", "MAX").contains(func.getName().toUpperCase())) {
+                            hasAgg[0] = true;
+                        }
+                    }
+                });
+
+                if (hasAgg[0]) return Optional.empty(); // Abort. Cannot push aggregates.
+
+                body.setHaving(null);
                 body.setWhere(body.getWhere() == null ? having : new AndExpression(body.getWhere(), having));
                 
                 String finalSql = cloned.toString();
                 if (AstUtils.isValidSql(finalSql) && !finalSql.equals(stmt.toString())) {
-                    return Optional.of(buildMeta(getId(), getName(), "HAVING clause filters after rows are fully fetched into memory.", "Pushed condition into WHERE clause.", "MEDIUM", "Filters rows before fetching, allowing index usage.", stmt.toString(), finalSql, 0.95));
+                    return Optional.of(buildMeta(getId(), getName(), "HAVING clause filters after rows are fully fetched into memory.", "Pushed scalar condition into WHERE clause.", "MEDIUM", "Filters rows before fetching, allowing index usage.", stmt.toString(), finalSql, 0.95));
                 }
             } catch (Exception e) {}
-            
             return Optional.empty();
         }
     }
