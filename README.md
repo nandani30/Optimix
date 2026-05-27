@@ -51,16 +51,20 @@ Because this is an independent project, it is not signed with a commercial Apple
 ## Project Screenshots/Output
 
 ### Landing & Secure Authentication
-![Sign In Screen](assets/landing.jpg)
+![Sign In Screen](assets/landing.png)
 
 ### Database Connection Management
 ![MySQL Connections](assets/connections.png)
 
 ### Intelligent Query Optimization (AST Rewriting)
-![Optimizer Window](assets/optimizer.jpg)
+![Optimizer Window](assets/optimizer.png)
 
 ### Optimization History
-![History Dashboard](assets/history.jpg)
+![History Dashboard](assets/history.png)
 
 ### Optimization Metrics
+<<<<<<< HEAD
 ![Metrics Dashboard](assets/dashboard.jpg)
+=======
+![Metrics Dashboard](assets/dashboard.png)
+>>>>>>> 8a726e6 (docs: finalize README with screenshots and project details)
